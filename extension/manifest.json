@@ -19,6 +19,7 @@
     "https://*/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://venice.ai/*",
     "http://127.0.0.1:8765/*",
     "http://127.0.0.1:8766/*",
     "http://127.0.0.1:8767/*",
@@ -40,6 +41,12 @@
     "type": "module"
   },
   "content_scripts": [
+    {
+      "matches": ["https://venice.ai/*"],
+      "js": ["venice-recon.js", "usage.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://chatgpt.com/*",
