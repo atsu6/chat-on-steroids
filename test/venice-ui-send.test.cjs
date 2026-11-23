@@ -128,7 +128,7 @@ test('baseline excludes a previous chat; helper completion cannot finish an open
   let resolved = false;
   const result = h.api.sendViaUi('new text').then(text => { resolved = true; return text; });
   await h.advance(ENTER_WAIT);
-  await h.w.fetch('/helper', { method: 'POST' });
+  await h.w.fetch('/api/inference/helper', { method: 'POST' });
   await tick();
   await h.advance(500);
   assert.equal(resolved, false);
@@ -430,3 +430,21 @@ for (const disabled of [false, true]) {
     assert.equal(h.timers.size, 0);
   });
 }
+
+test('sendViaUi observes a new chat when the recorder already contains 200 records', async t => {
+  const h = harness(t);
+  h.recon.start();
+  for (let i = 0; i < 200; i++) await h.w.fetch(chat, {method: 'POST'});
+  await h.settle();
+  assert.equal(h.recon.chatProgress().lastChatNumber, 200);
+  assert.equal(h.recon.status().limitReached, false);
+  h.submit();
+  const result = h.api.sendViaUi('next turn after 200 records');
+  await h.advance(ENTER_WAIT); await h.settle(); await h.advance(500);
+  assert.equal(await result, '合成の回答');
+  assert.equal(h.recon.chatProgress().lastChatNumber, 201);
+  assert.equal(h.recon.status().requests, 200);
+  assert.equal(h.recon.status().limitReached, true);
+  assert.equal(h.calls.length, 201);
+  assert.equal(h.followed, 0);
+});

@@ -45,7 +45,7 @@
    429 が出た場合は追加送信せず、画面や `Retry-After` に従って待つ。
    自動リトライはしない。警告が出た場合は送信を止める。
 10. Console で `window.__cosVeniceRecon.status()` を確認する。
-    `requests` は記録候補の件数で、チャット送信数とは限らない。
+    `requests` は現在保持している記録の件数（最大200）で、チャット送信数や累計件数ではない。
     `window.__cosVeniceRecon.progress()` では本文を出さずに
     `{ recording, requests, lastNumber, lastBodyComplete, lastStatus }` を確認できる。
     記録がなければ `lastNumber: 0`、`lastBodyComplete: false`、`lastStatus: null`。
@@ -94,15 +94,24 @@
   これは拡張の色を CSS に反映するスクリプトで、ページ JS の注入ヘルパーではない。
   Venice の fetch 観測は引き続き `usage.js` と同じ manifest 登録の MAIN / document_start を使い、
   `app-palette.js` は Venice へ読み込まない。
-- Venice ページから `venice.ai` とそのサブドメインへ向かう `fetch` の書き込みメソッド、
-  および実際に `text/event-stream` が返った GET を対象にする。
-  エンドポイント名は決め打ちしない。リクエストは元の `fetch` へ1回だけ渡し、元の Promise を返す。
+- Veniceページから `venice.ai` とそのサブドメインへ向かうHTTPS fetchのうち、URLのパスに
+  `/api/inference/` を含むものだけを対象にする。クエリやfragmentに含むだけでは対象にならない。
+  `t.venice.ai` / `clerk.venice.ai` は除外し、`/api/app/user/client_attestation/mint` 等の
+  推論以外の通信も記録しない。書き込みメソッドと、実際にtext/event-streamが返ったGETだけを保持する。
+  リクエストは元のfetchへ1回だけ渡し、元のPromiseを返す。対象外の本文は複製しない。
 - レスポンスは複製を UTF-8 の生テキストとして記録する。JSON / SSE の意味パースはしない。
   `body.text` に連結テキスト、`body.chunks` に複製リーダーが受け取ったバイト数と時刻を残す。
   これはネットワークパケット境界や SSE イベント境界とは限らない。
-- 最大8リクエスト、各 request / response body は最大1 MiB・2048チャンク。
-  `limitReached`、`complete`、`limitation` を見て完全・部分記録を区別する。
+- 最新200リクエストを保持するリングバッファ。新しい記録を追加するたびに、満杯なら最古を破棄する。
+  numberは配列長とは独立したセッション内の連番で、破棄後も増え続ける。start()で新しい記録を始めると1からになる。
+  各request / response bodyは従来どおり最大1 MiB・2048チャンク。
+  status()と保存JSONの `limitReached` は「直近のレコード追加時に古い記録を破棄したか」。
+  200件ちょうどではfalse、201件目の追加でtrueになる。対象外通信や状態参照・stop/saveではリセットせず、
+  新しいstart()でfalseに戻る。本文の完全性は `complete` / `limitation` で区別する。
   `response: null` は保存までにレスポンス未観測、`networkError` は観測上の失敗コード。
+- progress() / chatProgress() / summary() / follow()の戻り値の形は維持する。
+  summary()は保持中の記録を `{number, url, method, status, complete, text}` の配列で返す。
+  progressのlastNumberやfollowのrecord番号は200を超えても増えるため、配列indexとして使わない。
 - 文字列・URLSearchParams の送信本文、および `Request` の複製本文を記録する。
   `init.body` が FormData・Blob・バイナリ・ReadableStream などの場合は読み取らず、
   `non-text-init-body-not-read` を残す。未知の本文を推測で復元しない。
