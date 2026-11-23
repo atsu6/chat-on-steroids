@@ -732,3 +732,39 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 実ブラウザでの確認時は拡張を再読み込みし、非機密の作業ページでブリッジの往復を確認する。
   今回は合成テストとローカルcommitまでとし、送信・pushは行わない。
+
+## 2026-11-23 — sendViaUiの送信トリガとnudge（実送信なし）
+
+### 分かったこと
+
+- ユーザーから、長い複数行テキストでbaseline=7のまま90秒タイムアウトしたとの報告を受けた。
+  対応するcaptureファイル名・record番号は未提供。今回、実UIで再現・再送はしていない。
+- manifest登録済みの `extension/venice-send.js` を変更した。native setterとinputイベントの後、
+  requestAnimationFrameを2回、さらに50ms待つ。待機後の値が空白のみまたは空なら例外で停止する。
+- 有効な送信ボタンを見つけた場合はさらに100ms待ってclickする。ボタンなし・disabled時はEnter。
+  100msの間に無効化・切断されたボタンもクリックせずEnterへ切り替える。
+  Enterのkeydown / keypress / keyupはcomposed=true、isComposing=falseにした。
+- 初回送信トリガ後から500ms間隔でchatProgressを確認する。2秒経ってもlastChatNumberが
+  基準値と同じ場合だけEnterで1回nudgeする。新しいrecord番号があれば、本文が未完了でもnudgeしない。
+  応答待ちの90秒は初回送信トリガ後から数え、入力反映・ボタン待機時間は含めない。
+- タイムアウトのErrorは既存のbaseline / chatProgressを保ち、textareaLength / buttonFound /
+  buttonDisabledを追加する。メッセージにも文字数・有無・disabled状態を記録し、入力本文は含めない。
+  ボタンがない場合のbuttonDisabledはnull。診断はタイムアウト時点の状態を使う。
+- `node --check extension/venice-send.js` と `node --check test/venice-ui-send.test.cjs` が成功。
+  `node --test test/venice-ui-send.test.cjs` は16件成功した。2フレーム+50ms、ボタンの100ms、
+  長い複数行文字列、両方のボタンセレクタ、disabled時のEnter、空値停止、nudgeの時刻と回数、
+  タイムアウト診断を合成DOM・合成通信・仮想時計で確認した。
+  既存のSSE異常終端、401/403停止、重複呼び出し、購読解除の検証も成功した。
+- 実送信・実ブラウザ操作は0回。新しいcapture/record番号はない。
+  この実装の根拠は上記合成テストであり、実通信の成功確認ではない。
+
+### 不明なこと
+
+- Reactの状態反映前にEnterが届くことが実際の原因か、および今回の待機で実UIの不送信が解消するかは未確認。
+- 実ブラウザのrequestAnimationFrameの実行間隔とバックグラウンドタブでの待機時間は未検証。
+- 既知のprivate endpointの403原因、規約解釈、認証等の不明点は未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 実UIで検証する場合は送信範囲を確認し、長い複数行テキストでrecord番号が進むかを確認する。
+  今回は合成検証とローカルcommitまでで停止し、送信・pushはしない。
