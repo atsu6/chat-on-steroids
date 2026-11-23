@@ -632,3 +632,30 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 実UIでの検証に進む場合は、利用許可と実送信の実施範囲を先に確認する。
   今回は実装・ローカル検証・コミットまでで停止し、pushしない。
+
+## 2026-11-23 追記 — UI送信成功のユーザー報告
+
+### 分かったこと
+
+- ユーザーから、`sendViaUi` で1ターン送信し、HTTP 200、本文「黄色い自転車」を取得したとの実測報告を受けた。
+  送信はfetch再現ではなく、TEXTAREAへの値設定とEnterで行ったとの報告。
+  本タスクでは再送していない。根拠は本タスクのユーザー報告で、新しいcaptureファイル名とrecord番号は未提供。
+- fetch再現の `sendTurn` は403のため未使用。`extension/venice-send.js` にもその旨のコメントがある。
+  先行するfetch再現の403は、`venice-capture-2026-11-23T13-27-41-319Z.json` のrecord #1として記録済み。
+- `docs/venice-adapter-contract.md` を現存する `sendViaUi(text)` の説明へ更新した。
+  旧 `sendTurn` のResponseではなく、解析後の本文文字列を返す非同期関数として区別した。
+- 本タスクの変更は文書のみ。`extension/venice-send-ui.js` の削除、manifestの変更、送信実装の一本化は行っていない。
+- `venice-recon.js`、`venice-sse.js`、`venice-send.js`、`venice-send-ui.js` の `node --check` が成功した。
+  SSEのオフラインテストは合成15件と既存fixture1件の計16件が成功した。
+  UI送信関数は実行せず、UI送信のテストは今回の確認に含めていない。
+
+### 不明なこと
+
+- 403の原因、§12(d)の解釈、attestationと認証ヘッダの要否は未確認のまま。
+  今回調査せず、未解明のまま引き継ぐ。
+- 新しい成功報告に対応するcaptureファイル名・record番号と、既存の2つのUI送信実装のどちらが実行されたかは未確認。
+
+### 次に確認したいこと
+
+- 既存の成功記録を独立検証する場合は、対応するcaptureファイル名・record番号が必要。
+  今回はユーザー報告として記録し、追加送信・pushは行わない。

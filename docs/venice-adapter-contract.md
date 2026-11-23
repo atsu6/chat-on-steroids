@@ -1,17 +1,28 @@
 # Venice adapter boundary
 
-- `sendTurn(messages, model)`
+- `sendViaUi(text)`
 - `onChunk(cb)`
 - `onDone(cb)`
 - `setModel(id)`
 - `isAlive()`
 
-`sendTurn` のみ `extension/venice-send.js` に実装した。
-実通信の検証は HTTP 403 とプログラム利用禁止の警告で停止中。HTTP 200 は未確認。
-Venice ページの MAIN 文脈で読み込むと `window.__cosVeniceSend.sendTurn(messages, model)` が使える。
-messages は fixture の `input.messages` と同じ配列形式、model はURLの `agentModelId` に入れる文字列。
-戻り値は fetch の Promise で、元の Response をそのまま返す。401等のHTTPエラーもパース・再試行しない。
-認証情報の生成・取得や認証ヘッダの追加は行わない。標準 Content-Type は `application/json`。
+## 送信実装の現状（2026-11-23）
+
+`extension/venice-send.js` に `sendViaUi(text)` が存在する。
+空でない文字列を受け取り、UI入力と応答の取得・SSE解析を経て、本文文字列を返す非同期関数。
+送信中の重複呼び出し、依存や入力欄の不足、タイムアウト、SSEの異常終端は例外になる。
+モデル指定の引数はなく、旧 `sendTurn(messages, model)` の置き換えに伴い戻り値も
+Response ではなく本文文字列になっている。
+
+2026-11-23のユーザー報告では、UI経由の1ターンでHTTP 200と本文「黄色い自転車」を取得した。
+これは本タスクでの再送・独立検証の結果ではなく、captureファイル名とrecord番号は未提供。
+詳細は `docs/venice-findings.md` の「2026-11-23 追記 — UI送信成功のユーザー報告」を参照。
+
+旧 `sendTurn(messages, model)` は「403 のため未使用」のコメント付きで残っている。
+fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの要否は未確認のまま。
+
+作業ツリーには別ファイル `extension/venice-send-ui.js` とそのmanifest登録も存在する。
+今回の文書更新では削除・登録変更を行っておらず、実装の一本化は未完了。
 
 他の4つは境界の宣言のみ。コールバックのペイロード、完了判定、モデル選択の実装は（空欄・不明）。
 
