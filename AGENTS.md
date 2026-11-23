@@ -7088,3 +7088,32 @@ failure/test entry points. Integrate changed logic into its owning section inste
 an unrelated rule at the end. Remove obsolete descriptions and resolved gap entries. Prefer
 owners and bounded contracts over volatile counts, copied worklogs and duplicated implementation
 detail. A new durable fact must have one named owner, lifetime and publication boundary.
+
+## 23. Venice Web UI フォークの追加ルール
+
+- 最初に `docs/adr/0001-venice-web-transport.md` を読む。
+- 新しいアプリは作らない。既存 Chat On Steroids の接続先を Venice Web UI へ差し替える。
+- 触ってよい: `extension/manifest.json`、`extension/venice-*.js`（新規）、
+  `extension/content.js`（アダプタ登録の分岐のみ）、`extension/usage.js`
+  （トレース対象ホストの追加のみ）、`docs/`、`fixtures/`。
+- 触ってはいけない: `src/` 配下、`chatgpt-dom.js`、`fiber.js` 本体。ChatGPT 対応を壊さない。
+- 依存を追加しない。必要なら提案だけ。
+- ページ文脈での実行は `app-palette.js` の注入方法に倣う。
+  ネットワーク傍受は `usage.js` のトレースを拡張する。
+- 推測で値を埋めない。不明は空欄と明記。
+- 各タスクの最後に `docs/venice-findings.md` へ
+  「分かったこと / 不明なこと / 次に確認したいこと」を追記。
+- ブランチを切るだけで push しない。認証情報をコミットしない。
+
+### 今回の到達点
+
+人間が操作した送信リクエストとレスポンスの記録・伏字保存まで。
+パース、再送、アダプタの実動作、アプリ本体の変更は行わない。
+実測 fixture は `fixtures/.gitignore` で除外し、共有・コミット前に別途確認する。
+
+上流同期時は upstream の本文を正として、この Venice 節だけを再適用する。
+`docs/chat-on-steroids-agent-map.md` は 2.1.35 時点の保存資料であり、
+現行の上流設計・所有境界はこのファイルの §§1–22 を参照する。
+`app-palette.js` は 2.1.54 では manifest 登録の ISOLATED スクリプトであり、
+ページ JS を注入するヘルパーではない。Venice の fetch 観測は `usage.js` と同じ
+manifest 登録の MAIN / document_start を使い、palette 本体は変更しない。

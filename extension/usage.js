@@ -13,6 +13,11 @@
  */
 (() => {
   'use strict';
+  // Venice's opt-in raw trace is separate from ChatGPT's bounded projections.
+  if (location.hostname === 'venice.ai') {
+    window.__cosVeniceRecon?.install();
+    return;
+  }
   const OBSERVER_VERSION = 8;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
