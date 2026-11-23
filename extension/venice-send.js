@@ -1,4 +1,4 @@
-/* Fixture #2 body, with only input.messages and agentModelId supplied by the caller. */
+/* UI input sender; the legacy fixture-based fetch sender remains unused. */
 (() => {
   'use strict';
   if (location.origin !== 'https://venice.ai' || window.__cosVeniceSend) return;
@@ -202,6 +202,7 @@
   };
   const CAPTURED_URL = "https://outerface.venice.ai/api/inference/chat/agents/venice?agentModelId=deepseek-v4-1-flash&allowPaidImages=true&paidImagesMode=allow";
 
+  // 403 のため未使用。UI sender からは呼ばず、自動再試行もしない。
   function sendTurn(messages, model) {
     if (!Array.isArray(messages)) throw new TypeError('messages must be an array');
     if (typeof model !== 'string' || !model.trim()) throw new TypeError('model must be a non-empty string');
@@ -217,5 +218,55 @@
     });
   }
 
-  window.__cosVeniceSend = Object.freeze({ sendTurn });
+  let sending = false;
+  async function sendViaUi(text) {
+    if (typeof text !== 'string' || !text.trim()) throw new TypeError('text must be a non-empty string');
+    if (sending) throw new Error('UI送信は既に実行中です。');
+    const recon = window.__cosVeniceRecon;
+    const parser = window.__cosVeniceSse;
+    if (!recon || !parser) throw new Error('Venice の記録器または SSE パーサが未注入です。');
+    const textarea = document.querySelector('textarea[aria-label="チャットメッセージ入力"]');
+    if (!textarea) throw new Error('チャットメッセージ入力の TEXTAREA が見つかりません。');
+    if (!recon.status().recording) recon.start();
+    const baseline = recon.chatProgress().lastChatNumber;
+    const bodies = new Map();
+    const unfollow = recon.follow((chunk, number) => {
+      if (number > baseline) bodies.set(number, (bodies.get(number) ?? '') + chunk);
+    });
+    sending = true;
+    const deadline = Date.now() + 90_000;
+    try {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      for (const type of ['keydown', 'keypress', 'keyup']) {
+        textarea.dispatchEvent(new KeyboardEvent(type, {
+          key: 'Enter', code: 'Enter', keyCode: 13, charCode: type === 'keypress' ? 13 : 0,
+          which: 13, bubbles: true, cancelable: true
+        }));
+      }
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const last = recon.chatProgress();
+        if (Date.now() <= deadline && last.lastChatNumber > baseline && last.lastChatBodyComplete) {
+          const parsed = parser.parse(bodies.get(last.lastChatNumber) ?? '');
+          if (!parsed.ok) {
+            throw new Error(`Venice SSE が正常終了しませんでした: record=${last.lastChatNumber}, status=${last.lastChatStatus}, termination=${parsed.termination}`);
+          }
+          return parsed.text;
+        }
+        if (Date.now() >= deadline) {
+          const error = new Error(`Venice UI送信が90秒でタイムアウトしました: baseline=${baseline}, chatProgress=${JSON.stringify(last)}`);
+          error.baseline = baseline;
+          error.chatProgress = last;
+          throw error;
+        }
+      }
+    } finally {
+      unfollow();
+      sending = false;
+    }
+  }
+
+  window.__cosVeniceSend = Object.freeze({ sendTurn, sendViaUi });
 })();

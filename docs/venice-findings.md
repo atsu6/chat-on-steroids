@@ -590,3 +590,45 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - このパーサの追加検証は保存済みfixtureまたは合成データで行える。
   ライブ送信の方針とは分け、今回のタスクAだけをコミットして停止する。pushはしない。
+
+## 2026-11-23 — UI送信基盤（実送信なし）
+
+### 分かったこと
+
+- 前提の実測は、実UIの2ターンが `POST /api/inference/chat/agents/venice` でHTTP 200
+  （`venice-capture-2026-11-23T13-15-07-891Z.json` の record #2 / #3）、
+  fetch再現はHTTP 403（`venice-capture-2026-11-23T13-27-41-319Z.json` の record #1）。
+  今回、新しい実通信のrecordは取得していない。
+- manifestのVenice用MAIN / document_start登録を
+  `venice-recon.js` → `venice-sse.js` → `venice-send.js` → `usage.js` の順にした。
+  傍受の設置は引き続き `usage.js` のVenice分岐が担当する。
+- `follow(cb)` はチャットURLを含むPOSTのSSE応答から、到着ごとの生テキスト差分を
+  `cb(text, recordNumber)` へ渡す。戻り値の関数で購読解除できる。再配信はしない。
+  応答はcloneだけを読み、元fetchは1回だけ呼び、元のPromiseを返す。
+- `chatProgress()` は `/inference/chat/` を含む最新recordの番号・本文読み取り完了・HTTP statusを返す。
+  対象なしは `0 / false / null`。補助通信のHTTP 200をチャット成功に取り違えない。
+  既存 `progress()` / `status()` の戻り値と意味は変えていない。
+- `__cosVeniceSend.sendViaUi(text)` は記録を必要時に開始し、既存の最新チャット番号を基準値にする。
+  対象TEXTAREAのnative setter、bubbling input、Enterのkeydown / keypress / keyupを使い、
+  500ms間隔、最大90秒で新しいチャット本文の読み取り完了を待つ。
+  同じrecordのSSEだけを既存パーサで解析し、正常終端ならtextを返す。
+  タイムアウト例外はメッセージと `baseline` / `chatProgress` プロパティに基準値・最終進捗を持つ。
+  終了時は購読を解除する。旧 `sendTurn` は「403 のため未使用」として残し、UI経路から呼ばない。
+- `test/venice-ui-send.test.cjs` はjsdomのTEXTAREA、合成Response、仮想時計を使用する。
+  native setterの使用、イベントの順序とbubbling、500ms待機、旧recordの除外、
+  補助通信と未完了本文の区別、90秒の例外内容、異常SSE・401 / 403での停止、購読解除を確認した。
+  実ブラウザやprivate fixtureには依存しない。
+- 構文検査、合成テスト43件、既存fixtureのオフライン解析1件、既存拡張テスト393件が成功した。
+  fixtureテストはファイル不在時にskipするようにした。実fixture自体は変更・コミットしない。
+
+### 不明なこと
+
+- 403の原因、§12(d)の解釈、UI送信の許可の可否、attestationと認証ヘッダの要否は未確認。
+  未解明のまま引き継ぐ。今回、原因調査やヘッダ・attestationの補完は行っていない。
+- 合成イベントが実Venice UIで送信を成立させるかは未確認。今回の検証はローカル合成DOMのみで、実送信は0回。
+- サーバ側の履歴保持と実UIのContent-Typeの不明点も引き継ぐ。
+
+### 次に確認したいこと
+
+- 実UIでの検証に進む場合は、利用許可と実送信の実施範囲を先に確認する。
+  今回は実装・ローカル検証・コミットまでで停止し、pushしない。

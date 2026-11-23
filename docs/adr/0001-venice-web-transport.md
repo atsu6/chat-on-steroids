@@ -42,3 +42,34 @@ private endpoint の再送はここで停止した。API 移行は再検討対�
 クレジット消費対象のプレミアムテキストモデルは別扱いで、API はモデル別従量課金。
 初回偵察は手動送信の記録に限定した。その後の単発sender検証は上記403で停止しており、
 自動ループや認証ヘッダを補う処理は実装していない。
+
+## 2026-11-23 追記
+
+### 実測したこと
+
+- 実UIで2ターン送信した通信は `POST /api/inference/chat/agents/venice`、HTTP 200 だった。
+  根拠: `venice-capture-2026-11-23T13-15-07-891Z.json` の record #2 / #3。
+- 同じリクエストを fetch で再現した単発送信は HTTP 403 だった。
+  根拠: `venice-capture-2026-11-23T13-27-41-319Z.json` の record #1。
+  当時の警告本文と再送停止は上記の記録どおり。403の原因は未確認で、今回調査しない。
+
+### 現行の送信方式
+
+`__cosVeniceSend.sendViaUi(text)` が実UIの `チャットメッセージ入力` TEXTAREA に
+native value setterで文字列を入れ、bubbling `input` と Enter の
+`keydown` / `keypress` / `keyup` を送る。private endpointへのfetch再現は使わない。
+既存 `sendTurn` は「403 のため未使用」として残す。
+
+記録中でなければ記録を開始し、呼び出し時の `chatProgress().lastChatNumber` を基準に、
+500ms間隔、最大90秒で新しいチャット応答本文の読み取り完了を待つ。
+`follow(cb)` はPOSTのチャットSSEを到着ごとの生テキスト差分とrecord番号で通知し、
+senderは同じrecordの差分を連結して `venice-sse.js` で解析する。
+`response.completed` で正常終了した応答のtextを返す。タイムアウトは基準値と最終進捗を含む例外にする。
+
+### 未確認のこと
+
+- UI操作を関数から行うことの許可の可否と、§12(d)の解釈。
+- fetch再現の403の原因、attestationと認証ヘッダの要否。
+- 合成イベントによる実UI送信の成立と、実アカウントでの応答取得。
+
+今回の検証は合成DOM・合成通信・仮想時計のみ。実送信は行わない。

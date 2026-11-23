@@ -130,7 +130,7 @@ describe('extension release metadata', () => {
 
     const venice = main.filter((entry) => entry.matches.includes('https://venice.ai/*'));
     expect(venice).toEqual([
-      { matches: ['https://venice.ai/*'], js: ['venice-recon.js', 'usage.js'], world: 'MAIN' }
+      { matches: ['https://venice.ai/*'], js: ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'usage.js'], world: 'MAIN' }
     ]);
     // The rest stays isolated: the page must not be able to reach the code that talks to
     // the service worker, holds the bridge token, or decides what gets recorded.
@@ -139,6 +139,8 @@ describe('extension release metadata', () => {
       expect(entry.js).not.toContain('fiber.js');
       expect(entry.js).not.toContain('usage.js');
       expect(entry.js).not.toContain('venice-recon.js');
+      expect(entry.js).not.toContain('venice-sse.js');
+      expect(entry.js).not.toContain('venice-send.js');
       expect(entry.world ?? 'ISOLATED').toBe('ISOLATED');
     }
   });

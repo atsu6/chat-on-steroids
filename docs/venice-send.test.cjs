@@ -47,7 +47,7 @@ test('sendTurn posts the captured shape and only replaces messages and agentMode
   assert.deepEqual(body.input.messages, input);
   assert.deepEqual(input, original);
   assert.deepEqual(body.clientTools.map(tool => tool.name), ['approve_paid_usage', 'edit_video']);
-  assert.deepEqual(Object.keys(h.api), ['sendTurn']);
+  assert.deepEqual(Object.keys(h.api), ['sendTurn', 'sendViaUi']);
 });
 
 test('each turn gets an independent body while the captured clientTools stay identical', () => {

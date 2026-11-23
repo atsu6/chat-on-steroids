@@ -1,4 +1,4 @@
-/* Manual, document-local fetch reconnaissance. No sends, retries or protocol parsing. */
+/* Document-local fetch reconnaissance. No sends, retries or protocol parsing. */
 (() => {
   'use strict';
   if (location.origin !== 'https://venice.ai' || window.__cosVeniceRecon) return;
@@ -10,6 +10,22 @@
   const sensitive = /authorization|cookie|session|token|secret|password|api[-_]?key|signature/i;
   let installed = false;
   let session = null;
+  const followers = new Set();
+
+  // Live decoded text deltas, plus the record number for exact response attribution.
+  // No replay; the caller owns concatenation and receives an unsubscribe function.
+  function follow(cb) {
+    if (typeof cb !== 'function') throw new TypeError('follow callback must be a function');
+    followers.add(cb);
+    return () => followers.delete(cb);
+  }
+  function publish(text, number) {
+    if (!text) return;
+    for (const cb of followers) {
+      try { cb(text, number); }
+      catch { /* A subscriber must not interrupt capture or the native response. */ }
+    }
+  }
 
   function remember(value, owner) {
     if (value) owner.secrets.add(value);
@@ -60,7 +76,7 @@
       limitation: bytes.length > MAX_BODY_BYTES ? 'body-byte-limit' : ''
     };
   }
-  async function readBody(stream, body, owner) {
+  async function readBody(stream, body, owner, onText) {
     if (!stream) { body.complete = true; return; }
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -71,7 +87,9 @@
         if (!owner.recording) break;
         if (done) { body.complete = true; break; }
         const bytes = value.subarray(0, MAX_BODY_BYTES - body.bytesCaptured);
-        body.text += decoder.decode(bytes, { stream: true });
+        const text = decoder.decode(bytes, { stream: true });
+        body.text += text;
+        onText?.(text);
         body.bytesCaptured += bytes.length;
         body.chunks.push({ afterStartMs: Date.now() - owner.startedMs, byteLength: bytes.length });
         if (bytes.length < value.length || body.bytesCaptured >= MAX_BODY_BYTES || body.chunks.length >= MAX_CHUNKS) {
@@ -80,7 +98,11 @@
           break;
         }
       }
-      if (owner.recording) body.text += decoder.decode();
+      if (owner.recording) {
+        const tail = decoder.decode();
+        body.text += tail;
+        onText?.(tail);
+      }
     } catch {
       if (owner.recording) body.limitation = 'body-read-failed';
     } finally {
@@ -140,7 +162,10 @@
           if (!record) return;
           record.response = { url: response.url ? safeURL(response.url, owner) : '', status: response.status,
             headers: headersOf(response.headers, owner), body: emptyBody() };
-          void readBody(response.clone().body, record.response.body, owner);
+          const chatSse = request.method === 'POST' && request.url.includes('/inference/chat/') &&
+            response.headers.get('content-type')?.includes('text/event-stream');
+          void readBody(response.clone().body, record.response.body, owner,
+            chatSse ? text => publish(text, record.number) : undefined);
         } catch { if (record) record.networkError = 'response-not-readable'; }
       }, () => { if (owner.recording && record) record.networkError = 'fetch-rejected'; });
       return result; // Preserve the exact native promise and original response body.
@@ -156,6 +181,12 @@
     return { recording: Boolean(session?.recording), requests: session?.records.length ?? 0,
       lastNumber: last?.number ?? 0, lastBodyComplete: last?.response?.body?.complete === true,
       lastStatus: last?.response?.status ?? null };
+  }
+  function chatProgress() {
+    const last = session?.records.findLast(record => record.request.url.includes('/inference/chat/'));
+    return { lastChatNumber: last?.number ?? 0,
+      lastChatBodyComplete: last?.response?.body?.complete === true,
+      lastChatStatus: last?.response?.status ?? null };
   }
   function start() {
     if (!installed) throw new Error('usage.js の Venice トレースが未注入です。ページを再読み込みしてください。');
@@ -197,5 +228,5 @@
     setTimeout(() => URL.revokeObjectURL(blobURL), 60_000);
     return { filename, requests: session.records.length, savedBy: 'browser-download' };
   }
-  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status, progress });
+  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status, progress, follow, chatProgress });
 })();
