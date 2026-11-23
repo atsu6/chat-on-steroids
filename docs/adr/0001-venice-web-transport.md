@@ -31,6 +31,11 @@ fixture に基づく単発送信が HTTP 403 となり、レスポンスはプ�
 `fixtures/venice-capture-2026-11-23T13-27-41-319Z.json` の #1。
 private endpoint の再送はここで停止した。API 移行は再検討対象になったが、まだ実施・承認していない。
 
+追加の読み取り確認では、scope `https://venice.ai/` のSW登録が1件あり、controllerは
+`pwa-install-sw.js` / `activated` だった。登録の存在だけでヘッダ付与の有無は判断できない。
+認証・attestationを再現して拒否を回避する調査や追加送信は行わず、停止状態を維持する。
+詳細は `docs/venice-findings.md` の「追加送信なしのリソース・Service Worker登録確認」を参照する。
+
 ## 確認資料
 [Venice Pricing](https://venice.ai/pricing)（確認 2026-11-23）では、Pro に
 テキスト無制限と月100クレジット（$1相当）を記載している。
