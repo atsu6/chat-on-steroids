@@ -3,7 +3,8 @@
 初回調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、調査時HEAD `ffa8acac`。
 同日にA案を採用し、`6cc6823c` を基点にwire型・契約コメントと合成モデルテストを追加した。
 現在は `/venice/tools` → host-admitted kernel → `core/read` の縦接続を実装し、Consoleで実測済み。
-承認UIは未実装で、開発モードの一時grant IPCを使う。モデルへの送信は行っていない。
+承認UIは未実装で、開発モードの一時grant IPCを使う。同日の後続E2Eでモデル経由のreadも1回成功した
+（`docs/venice-findings.md` の「モデル経由のcore/read E2E」参照）。
 以下のパスはこのリポジトリを基準とし、既存ソースの行番号は初回調査時点のもの。
 
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
