@@ -1,13 +1,15 @@
 # Venice と Electron の接続計画
 
-調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、HEAD `ffa8acac` の作業ツリー。
-コード変更・アプリ起動・ブラウザ操作・Veniceへの送信は行っていない。
-以下のパスはこのリポジトリを基準とし、行番号は調査時点のもの。
+初回調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、調査時HEAD `ffa8acac`。
+同日にA案を採用し、`6cc6823c` を基点にwire型・契約コメントと合成モデルテストを追加した。
+RPC・gateway・ツール実行・承認UIの実装は次段階。アプリ起動・ブラウザ操作・Veniceへの送信は行っていない。
+以下のパスはこのリポジトリを基準とし、既存ソースの行番号は初回調査時点のもの。
 
-**推奨はA案: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
+**採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
 ただし、現在のbridgeにファイル・シェルを実行する入口はない。新しい信頼境界の設計と実装が必要になる。
-`AGENTS.md` の現行規則では `src/` は編集禁止なので、本書の変更候補は次回承認用の提案である。
+`AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
+今回の作業範囲は型・契約・合成テスト・文書のみで、最初の実接続は `read` のみにする。
 
 ## 1. agent map の要約（8行）
 
@@ -223,9 +225,48 @@ Aの既存browser-only利用には、新しいapp同意・接続条件を適用�
    base64をpromptのJSONへ埋め込まない。添付selector・UI受付の証拠・利用モデルのvision対応は未確認。
    AXのtext観測とローカルの画像previewまでは分けて検証できるが、それを画像を見たモデルのdesktop操作完了とは扱わない。
 
-Core/desktopでsurface境界を維持し、最初のallowlistは `read`, `apply_patch`, `exec_command`, `write_stdin`,
-構成に応じた `find`、macOSの `observe` / `computer` に限定する。任意IPC、Plugins、agents、Goal/Loopを一括公開しない。
+Core/desktopでsurface境界を維持し、初回公開のallowlistは `core/read` のみ。
+その後に `apply_patch`, `exec_command`, `write_stdin`, 構成に応じた `find`、macOSの `observe` / `computer` を
+段階的に追加する。任意IPC、Plugins、agents、Goal/Loopを一括公開しない。
 新namespaceの対応確認を行い、未対応appなら明示的に停止する。現行ChatGPT protocol 15の意味を変更しない。
+
+### 5.1. wire型と受付の状態遷移
+
+`src/shared/venice-integration.ts` は次の3型のみをexportする。実行時のvalidator・定数・関数は持たない。
+
+| 型 | フィールド |
+| --- | --- |
+| `VeniceToolCallRequest` | `runId: string`, `callId: string`, `surface: 'core' \| 'desktop'`, `tool: string`, `args: Record<string, unknown>` |
+| `VeniceToolCallResponse` | `callId: string`, `state: 'pending' \| 'completed' \| 'unknown'`, `result?: unknown`, `error?: string` |
+| `VeniceRunGrant` | `runId: string`, `sessionId: string`, `tabId: number`, `documentId: string`, `tools: string[]`, `roots: string[]` |
+
+grantはappが同意後に発行・保存する記録であり、clientから受け取って権限を作るデータではない。
+`tools` は `core/read` のようなsurface付きの名前を保存する。`roots` はファイルツールの承認rootで、
+shellの隔離境界ではない。requestは本人証明やgrantを含まず、送信元のtab/documentを実際の拡張contextから別途検証する。
+TypeScriptの型はwire入力を検証しないため、将来のgatewayには実行時のschema・許可照合が必要になる。
+
+受付はcall IDを最初のrun / surface / tool / argsに結び付ける。最初のawaitより前に予約し、
+同時に届いた同じ要求は同じ受付を待つ。引数または所有者を変えた同じcall IDは、既存記録を変えずに拒否する。
+
+```text
+未受付 → メモリ上でcall IDを予約 → 受付を永続化 → pending → 最大1回の実行
+                                                         → 結果を永続化 → completed
+                                        再起動等で成否不明 → unknown（自動再実行なし）
+```
+
+- `pending` は受付の永続化後だけ返す。受付の保存失敗では実行しない。
+- `completed` は結果が確定・永続化した状態。tool自体の失敗や、受付後・実行前のrun失効による実行拒否も含む。
+  `result` は元toolのcontent / structuredContent / isErrorを保ち、受付成功とtool成功を混同しない。
+- `unknown` は未受付の拒否または受付後の成否不明。`error` で理由を区別し、自動再試行の根拠にしない。
+  合成テストでは `RUN_REVOKED`, `RUN_NOT_AUTHORIZED`, `CALL_ID_CONFLICT`,
+  `ACCEPTANCE_NOT_DURABLE`, `RESULT_NOT_DURABLE` という理由を使う。実HTTP error mappingは次段階。
+- 同じcall IDの再取得は、現在のpending/completed/unknown記録を返すだけで、新規実行しない。
+  run失効は新規受付を拒否する。受付の永続化待ちの後にも失効を再確認し、実行前なら止める。
+  失効前の結果を再取得する場合も、元の所有者を独立して認証する。失効したrunをclientの要求で復活させない。
+
+`test/venice-integration.test.ts` はこの遷移の実行可能な仕様である。
+メモリ上の疑似journal、遅延できる保存応答、実行回数spyで契約を検証する。
+appのgateway、実ディスク永続化、送信元認証、再起動からの復元を検証するものではない。
 
 ## 6. A案とB案の比較
 
@@ -240,7 +281,7 @@ macOS screenshot/click/key、モデルへ画像を渡すUI transport、失効・
 | 状態の所有者 | `venice-agent.js::runTask` がstep/stopを所有。appはrun許可・local toolとその結果のみを所有。 | 新しい `src/main/venice-runner.ts` がstep/stopを所有。拡張はsend/応答観測/ブラウザ操作を依頼どおり行う。 |
 | 経路 | 既存MAIN → ISOLATED → background → 新gateway → registrar/kernel → 既存tool。browser toolは現状維持。 | app runner → provider adapter → bridgeのoffer/claim/result → background → Venice UI。model actionをappが解析してlocal toolを呼び、browser toolだけ拡張へ返す。 |
 | コード変更ファイル数の基準見積り | **19ファイル**（新規含む）。下記共通候補のみ。 | **25ファイル**（共通19 + 追加6）。 |
-| テスト・文書を含む基準見積り | test 5 + docs 2を加え **26ファイル**。 | test 7 + docs 2を加え **34ファイル**。 |
+| テスト・文書を含む基準見積り | test 6 + docs 2を加え **27ファイル**。 | test 8 + docs 2を加え **35ファイル**。 |
 | 実行実体の再利用率 | 下記10実行moduleの **10/10 = 100%を改変せず利用する設計**。 | 同じ **10/10 = 100%**。loopを移すだけでは既存toolの再利用率は上がらない。 |
 | Veniceの既存3機能単位の維持率 | loop、UI sender/SSE、作業タブDOM実行の **3/3**。RPC分岐は追加する。 | sender/SSE、DOM実行の **2/3**。loopは移設し、panelをapp状態の表示に変える。 |
 | 壊れやすさ | 比較的小さい。ただしMAIN再読込でloop状態は失われ、appの許可・結果との照合が必要。切断後は停止し、勝手に復元しない。 | 比較的大きい。UI transportのclaim/receipt、outbox、stop、session開始・promptとloop所有者を同時に変更する。appにloopがあっても曖昧な送信を自動再送できるわけではない。 |
@@ -248,9 +289,10 @@ macOS screenshot/click/key、モデルへ画像を渡すUI transport、失効・
 | 実装順 | 共通契約 → textのreadだけ縦接続 → patch → shell/stdin/rg → DesktopのAX/画像添付 → 回帰検証。 | 共通契約 → 合成providerでrunner → browser send/receipt adapter → outbox/session/panelの接続 → local tool → Desktop/media → 既存loopの撤去と回帰検証。 |
 
 **数え方と確度:** 実装前の候補ファイルに基づく基準値で、実測diffやLOC再利用率ではない。
-添付UI・provider sessionの詳細と型依存で増減する。テストは5/7の直接対象ファイルを見込み、
+添付UI・provider sessionの詳細と型依存で増減する。テストは6/8の直接対象ファイルを見込み、
 追加の既存回帰test修正は別に増え得る。画像添付を後回しにして最初のtext縦接続を作っても、上の完成範囲は変えない。
 Bの数にはapp不要の旧loop互換モードを含めていない。現行のapp不要という利用条件を保つ場合は追加見積りが必要。
+初回見積りの26/34から、今回追加した契約モデルtestの1ファイル分を両案に加えた。コード候補19/25は変わらない。
 
 共通19ファイルの候補:
 
@@ -272,14 +314,13 @@ Bの追加6ファイル候補:
 permission/identity/recording層はこの「無改変再利用」の分母に含めていない。
 
 直接対象testの見積りは、既存 `test/venice-agent.test.cjs`, `test/venice-bridge.test.cjs` と、
-新規gateway/session/mediaの3ファイル。Bはrunner/providerの2ファイルを追加する。
+今回の `test/venice-integration.test.ts`、今後のgateway/session/mediaの3ファイル。Bはrunner/providerの2ファイルを追加する。
 docs 2は本書と `docs/venice-findings.md`。
 
-## 7. 推奨A案の最初の3ステップ
+## 7. 採用A案の最初の3ステップ
 
-1. **境界と変更許可を確定する。** 本書の `src/` 変更候補、appでのrun同意、provider/session証明、
-   tool allowlist、text/imageの送信範囲を承認対象にする。新wire型と失効・重複時の応答を合成testで固める。
-   Venice認証ヘッダやprivate endpointを調べ直す必要はない。
+1. **契約を固定する（今回）。** A案とAGENTS.mdの変更対象は承認済み。wire型・状態遷移・合成モデルtestと
+   run同意の文言案を作る。最初の実接続はreadのみとし、Venice認証ヘッダやprivate endpointを調べ直さない。
 2. **textのreadを1本つなぐ。** appで許可したsessionから、既存panel/loop → ISOLATED/background → gateway →
    live registrar/kernel → `read` → 元の `ToolResult` → 次の合成model turn、まで通す。
    未pair、許可なし、別tab/document/session、期限切れ、root外、read無効、再読込後の呼び出しを拒否する。
@@ -292,11 +333,60 @@ docs 2は本書と `docs/venice-findings.md`。
 Bへ移る判断点は「脳タブ再読込をまたぐtask継続」や「appのoutboxをVenice操作の唯一の起点にする」が
 実際に必要になった時。Aのgatewayとcaller契約はそのまま使い、loop所有者だけを後から移せる形にする。
 
-## 8. 検証済みの範囲と残る確認
+## 8. 初回調査の証拠と残る確認
 
 - 今回の証拠はソース読取。ポート値は設定/実装値で、稼働中listenerを実測したものではない。
 - `pwd` と直近logは依頼どおり確認した。`ffa8acac`、`6d99720a`、`9ccfaecd`。
 - 文書の参照先、主要関数の行番号、見積り集計、diffを確認した。実装test・build・native操作・実送信は未実施。
-- 次回の実装はまず `src/` 編集禁止の変更承認が必要。画像添付DOM、vision対応、Venice chatの一意bindingは未確認。
+- `src/` の変更対象は現在AGENTS.mdのElectron統合節で承認済み。今回の契約作成に続く実接続はreadのみ。
+  画像添付DOM、vision対応、Venice chatの一意bindingは未確認。
 - private endpointの403原因、attestation/認証の要否、規約解釈、provider側の履歴保持、既知のContent-Type問題は
   未解明のまま引き継ぐ。ADRのprivate endpoint再送停止を維持し、今回の調査で送信再開は承認しない。
+
+## 9. 今回の変更対象と承認UIの文言案
+
+### 今回は4ファイルだけを変更する
+
+| ファイル | 今回の内容 |
+| --- | --- |
+| `src/shared/venice-integration.ts`（新規） | 3つのwire型と受付・重複・失効の契約コメント。 |
+| `test/venice-integration.test.ts`（新規） | 型の使用例と、テスト内だけの状態遷移モデル。疑似保存待ち中の重複、失効、保存失敗等。 |
+| `docs/venice-integration-plan.md` | 採用状態、wire契約、対象ファイル、段階、文言案。 |
+| `docs/venice-findings.md` | 分かったこと / 不明なこと / 次に確認したいこと、実際の検証結果。 |
+
+次回のread接続で実装する候補は§6の19ファイルのうち、次の範囲である。今回の変更対象には含めない。
+
+- 拡張: `extension/venice-agent.js`, `extension/venice-bridge.js`, `extension/background.js`（Venice分岐）, `extension/venice-panel.js`。
+- 入口とwire: `src/main/bridge.ts`, `src/main/venice-tool-gateway.ts`（新規）, `src/shared/venice-integration.ts`。
+- callerと記録: `src/main/mcp/kernel.ts`, `src/main/mcp/call-context.ts`, `src/main/session/recorder.ts`,
+  `src/main/session/store.ts`, `src/shared/session.ts`。
+- 許可と失効: `src/main/ipc.ts`, `src/preload/index.ts`, `src/renderer/chat.ts`, `src/renderer/index.html`, `src/main/index.ts`。
+- 画像用の `extension/venice-media.js` とその `extension/manifest.json` 登録は後段階。
+  patch/shell/grep/Desktopも後段階とし、read接続のために先行して有効化しない。
+
+### 初回のread許可
+
+**見出し:** 「Veniceによるファイルの読み取りを許可しますか？」
+
+**本文:** 「このrunでは、選択したフォルダー内のファイル内容を読み取り、Veniceへ送信できます。」
+
+**表示する対象:** ローカルsession / project、承認フォルダーの実際の一覧、対象Veniceタブ、許可tool「ファイルの読み取り（core/read）」。
+モデルやwebページが申告した値で表示内容を上書きせず、appの許可対象を表示する。
+
+**ボタン:** 「このrunだけ許可」 / 「許可しない」。許可はrun単位とし、全体の権限設定を広げない。
+
+### 将来shellを追加するときの独立した同意
+
+初回readの画面ではshellを許可しない。将来追加する際は、ファイル読取とは別の未選択の項目として提示する。
+
+**項目名:** 「コマンド実行を許可する」
+
+**説明:** 「Veniceは、あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、
+その外のファイルやネットワークにもアクセスできます。既存のコマンド許可ルールも適用されます。」
+
+書込は作成・編集・移動・削除を、Desktopは画面画像のVeniceへの送信とマウス・キー操作を別に示す。
+shellの許可を「承認フォルダー内だけの操作」と説明したり、readの許可から自動的に追加したりしない。
+
+**停止時の文言:** 「新しい呼び出しを停止しました。開始済みのコマンドは自動終了しません。」
+
+これらは文言案であり、今回IPC・UI部品・送信・実行機能は追加していない。
