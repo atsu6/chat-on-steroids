@@ -99,3 +99,143 @@
    既存 Vitest 群を扱う場合は、先に編集範囲を確認して MAIN 登録のホスト別アサーションへ更新する。
 
 同期と指定チェックで停止する。開発の追加、push、実アカウントへの送信は行わない。
+
+## 2026-11-23 — 既存 MAIN 登録テストのホスト別更新
+
+### 分かったこと
+
+- 該当箇所は `test/extension.test.ts` の `extension release metadata` 内。
+  テスト名を `scopes the two ChatGPT MAIN readers and one Venice MAIN trace to their own hosts` に変更した。
+- MAIN 登録を全体3件とし、ChatGPT 用2件と Venice 用1件を個別に検査する。
+  ChatGPT は `fiber.js` と `usage.js` がそれぞれ `chatgpt.com` / `chat.openai.com` のみ、
+  Venice は `venice-recon.js` → `usage.js` が `venice.ai` のみで、各登録の `world: MAIN` も完全一致で確認する。
+  その他の登録が ISOLATED のままで、これらの MAIN 用スクリプトを含まないことも確認する。
+- lockfile の既存依存を `npm ci --ignore-scripts --no-audit --no-fund --offline` で導入した。
+  package.json / package-lock.json は変更せず、依存追加・ライフサイクルスクリプト実行は行っていない。
+- `npm test -- test/extension.test.ts` で該当ファイルだけ実行し、1ファイル・393件すべて成功した。
+  以前記録した「MAIN 登録を2件に固定する不一致」はこの変更で解消した。
+  アプリ・拡張の実装や manifest は変更していない。commit / push は行っていない。
+
+### 不明なこと
+
+- 他のテストファイルは今回実行していない。依存導入時に Node 24.8.0 と一部の jsdom 関連依存の
+  engine 条件との差が警告されたが、今回の対象ファイルは実行・成功した。
+- 実ブラウザ注入・Venice 実通信の検証は引き続き未実施。
+
+### 次に確認したいこと
+
+- `docs/venice-recon.md` に沿った人間の手動記録を受け取り、未確認の通信仕様を確認する。
+
+## 2026-11-23 — Chrome 上の一貫偵察を送信前に中断
+
+### 分かったこと
+
+- 既存の `https://venice.ai/chat/agent` タブの Console（top 文脈）で status を実行した。
+  最後に確認できた結果は `installed: true, recording: true, requests: 6, readingBodies: 0, limitReached: false`。
+  前回開始した記録が残っていた。この6件は今回指定された2つのテスト文の送信記録ではない。
+- 表示中のチャット入力欄は `TEXTAREA`、aria-label は `チャットメッセージ入力` と確認できた。
+  今回は入力欄へのテスト文挿入・送信ボタンクリックを行っていない。
+- 現行の `window.__cosVeniceRecon` の公開APIは `install / start / stop / save / status` のみ。
+  `status()` は件数などを返すが、内部クロージャの `session.records` や最後の
+  `response.body.complete` は公開していない。このため依頼の手順4の完了条件を参照できず、
+  指示に従って送信前に中断した。`readingBodies: 0` だけで完了したとは扱わない。
+- タブの再読み込みはしていない。既存記録を置き換える新しい `start()` も実行していない。
+  記録を消さず停止するため `stop()` の実行を試みたが、Chrome 操作がタイムアウトし、
+  接続の再取得もタイムアウトした。停止操作が成立したかは未確認で、上記statusは停止試行前の値。
+- `save()` は実行していない。今回の保存ファイルはなく、JSON の取得・移動・伏字検査も未実施。
+  commit / push はしていない。
+
+### 知りたい項目5つ（今回の実測結果）
+
+| 項目 | 結果 | 根拠ファイル名・number |
+| --- | --- | --- |
+| 送信先エンドポイントとメソッド | 不明。指定テスト文は送信していない | なし（未保存） |
+| 履歴がサーバ保持かクライアント送信か | 不明 | なし（未保存） |
+| モデルIDの決定箇所 | 不明。画面の表示名だけではIDの根拠にしない | なし（未保存） |
+| 認証が Cookie かヘッダか | 不明。認証値の伏字も未検証 | なし（未保存） |
+| SSE のチャンク形式 | 不明 | なし（未保存） |
+
+### 不明なこと
+
+- 今回の送信 transport は不明（送信していない）。既存6件の URL・method 一覧は未取得。
+- 記録器の現在の recording 状態と、既存記録の内容は操作接続のタイムアウト後は再確認できていない。
+- Authorization / Cookie の生値が保存ファイルに残るかどうかは未検証。
+
+### 次に確認したいこと
+
+- Codex 側で Chrome 操作接続を復旧して既存記録の状態と保存を確認する。タブを再読み込みしない。
+- 再試行前に記録器の公開APIへ、本文や秘密を公開せず最後の record の番号・完了状態を読める
+  最小の観測口を追加する。今回の指示は詰まった時点で停止するため、このコード変更は行っていない。
+
+## 2026-11-23 — progress 観測口と2ターンの実測完了
+
+### 分かったこと
+
+- `venice-recon.js` に `progress()` を追加した。返すのは
+  `{ recording, requests, lastNumber, lastBodyComplete, lastStatus }` の5つだけで、本文・URL・ヘッダ・秘密は返さない。
+  record がなければ番号0・未完了false、レスポンス未観測ならステータスは `null`。
+  構文検査と合成テスト12件が成功した。
+- Chrome の既存タブへのブラウザ接続は今回の初回で取得できた。タブは再読み込みしていない。
+  以前の記録は8件で記録中だったため `stop()` を実行し、`recording: false` を確認した。
+  その後、停止済みの旧記録器を残して、タブ内の公開APIを progress 付きの記録器へ切り替えた。
+  旧フックは停止状態で通過するだけになり、新しい記録器だけを `start()` した。
+- `aria-label="チャットメッセージ入力"` の TEXTAREA に native value setter と bubbling input を使い、
+  Enter の keydown / keypress / keyup で指定文を送信した。送信ボタンへのフォールバックは不要だった。
+  1回目・2回目の質問と、それぞれへの「青い伞」という回答を実画面で確認した。
+- 完了条件は500ms間隔・90秒上限のポーリング処理で評価した。確認を始めた時点では既に条件を満たしていた。
+  1回目は `lastNumber: 2`、2回目は送信前の2を超えた `lastNumber: 4` を確認し、
+  いずれも `lastBodyComplete: true`、`readingBodies: 0`、`lastStatus: 200` だった。
+  1回目の完了確認後、2回目の送信まで1.5秒待った。
+- 保存前の status は `installed: true, recording: true, requests: 4, readingBodies: 0, limitReached: false`。
+  progress は `recording: true, requests: 4, lastNumber: 4, lastBodyComplete: true, lastStatus: 200`。
+  `save()` 後は両方の `recording` が `false` になり、他の値は同じ。
+- 保存ダイアログは出ず Downloads への保存が完了したため、次のファイルを `fixtures/` へ移動した。
+  `fixtures/venice-capture-2026-11-23T13-15-07-891Z.json`（28,305 bytes）。
+  4件すべて HTTP 200、response body は `complete: true`、取得制限・networkError はなかった。
+  実測ファイルは既存ルールで Git 除外のままとし、ローカル証拠として保持する。
+
+### 知りたい項目5つ（実測）
+
+以下の number はすべて `venice-capture-2026-11-23T13-15-07-891Z.json` 内の値。
+
+| 項目 | 分かったこと | 根拠 number |
+| --- | --- | --- |
+| 送信先エンドポイントとメソッド | `POST https://outerface.venice.ai/api/inference/chat/agents/venice`。クエリは `agentModelId=deepseek-v4-1-flash&allowPaidImages=true&paidImagesMode=allow` | 2, 3 |
+| 履歴がサーバ保持かクライアント送信か | 少なくともクライアントが履歴を再送している。1回目の `input.messages` は1件、2回目は4件で、前の user、reasoning item、assistant「青い伞」、新しい user を含む。サーバ側に保持されるかは不明 | 2, 3 |
+| モデルIDの決定箇所 | 送信時の指定箇所はURLの `agentModelId`。値は `deepseek-v4-1-flash`。画面の選択表示は `DeepSeek V4.1 Flash (1017)`。内部でこの値を決める関数や対応表は未調査 | 2, 3、同時の実画面 |
+| 認証が Cookie かヘッダか | 不明。`credentials: include` は観測したが、チャット通信の記録された request headers は空。ブラウザ自動付与 Cookie は不可視で、Authorization 不使用とも断定できない。別途 token 発行通信は観測した | 1–4 |
+| SSE のチャンク形式 | LFの空行区切り。`event: response.*` と `data: {JSON}`。JSONは `sequence_number` とイベント別フィールドを持つ。`: keepalive` コメントあり。`response.completed` の後に `data: [DONE]` で終わる | 2, 3 |
+
+SSE の詳細: `response.created` → `response.in_progress` → `response.output_item.added` /
+`response.content_part.added` → `response.output_text.delta` → 各 `*.done` → `response.completed` → `[DONE]`。
+delta のキーは `sequence_number / response_id / item_id / output_index / content_index / delta`。
+`output_index: 0` の item は `reasoning`、`output_index: 1` は `message`（role: assistant）で、
+どちらも `output_text.delta` を使う。将来のアダプタは delta を全連結せず、item の種類を区別する必要がある。
+記録内の response headers は空のため、Content-Type ヘッダの値はこの記録からは確認できない。
+
+### request.url / method の全件
+
+| number | method | request.url |
+| --- | --- | --- |
+| 1 | POST | `https://outerface.venice.ai/api/app/user/client_attestation/mint` |
+| 2 | POST | `https://outerface.venice.ai/api/inference/chat/agents/venice?agentModelId=deepseek-v4-1-flash&allowPaidImages=true&paidImagesMode=allow` |
+| 3 | POST | `https://outerface.venice.ai/api/inference/chat/agents/venice?agentModelId=deepseek-v4-1-flash&allowPaidImages=true&paidImagesMode=allow` |
+| 4 | POST | `https://clerk.venice.ai/v1/client/sessions/{session-id}/tokens?__clerk_api_version=2026-11-18&_clerk_js_version=6.46.2` |
+
+この表では session ID を伏せた。実測 JSON のURLパスには実値が残っている。
+チャット送信そのものを fetch として記録できた（#2, #3）。WebSocket 等が使われていないことまでは判断しない。
+
+### 認証値の確認と不明なこと
+
+- 記録された Authorization / Cookie / Set-Cookie ヘッダは0件なので、これらの値が
+  `[REDACTED]` に置換されたかは実通信では確認できない。見えないヘッダを取得したとは扱わない。
+- #1 の response body の `token` と #4 の `jwt` は `[REDACTED]`。
+  保存JSONの認証フィールド確認では未伏字の値は0件、JWT形式・Bearer形式の生値も見つからなかった。
+  ただし上記の session ID はURLパスに残っているため、このファイルをそのまま公開・コミットしない。
+- サーバの履歴保持、認証ヘッダの実態、UI内部のモデルID決定コード、Content-Type は不明。
+  通信エンドポイント・履歴のクライアント再送・送信時モデルID・SSEフレーミングは実測できた。
+
+### 次に確認したいこと
+
+- アダプタ実装へ進む場合は、この実測を入力にする。認証方式などの不明点は不明のまま引き継ぐ。
+  今回は再送、API直叩き、自動ループ、アダプタ本体には進まず、指定のコミットで停止する。
