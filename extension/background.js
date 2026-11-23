@@ -5775,6 +5775,29 @@ async function handleVeniceBridge(message, sender) {
     if (!isVeniceBridgeUrl(brain.url) || (brain.pendingUrl && !isVeniceBridgeUrl(brain.pendingUrl))) {
       return {ok: false, error: 'Venice brain tab has navigated away'};
     }
+    // Local tools use Chrome's sender document, never page-supplied tab/document fields.
+    if (['localIdentity', 'setLocalRun', 'localTool'].includes(message.op)) {
+      if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
+      await load();
+      const identity = {browserId, tabId: sender.tab.id, documentId: sender.documentId};
+      const runKey = `cosVeniceLocalRun:${sender.tab.id}:${sender.documentId}`;
+      if (message.op === 'localIdentity') return {ok: true, result: identity};
+      if (message.op === 'setLocalRun') {
+        if (typeof message.args?.runId !== 'string') throw new Error('runId is required');
+        await chrome.storage.session.set({[runKey]: message.args.runId});
+        return {ok: true, result: {runId: message.args.runId}};
+      }
+      const runId = (await chrome.storage.session.get(runKey))[runKey];
+      if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
+      const args = message.args ?? {};
+      if (args.surface !== 'core' || args.tool !== 'read') throw new Error('Only core/read is available');
+      const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({
+        sender: {tabId: sender.tab.id, documentId: sender.documentId},
+        request: {runId, callId: args.callId, surface: 'core', tool: 'read', args: args.args}
+      })});
+      if (!reply.ok) throw new Error(`Venice local tool transport failed: ${reply.data?.error || reply.error || reply.status}`);
+      return {ok: true, result: reply.data};
+    }
     // One working tab per brain tab. Session storage survives service-worker suspension.
     const key = `cosVeniceWorkTab:${sender.tab.id}`;
     const stored = (await chrome.storage.session.get(key))[key];

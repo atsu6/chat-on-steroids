@@ -14,6 +14,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AssetRef, FileChange, RunningToolActivity, ToolOutcome } from '../../shared/session.js';
+import type { Root } from '../../shared/types.js';
 import type { OutputPublication, ProcessCompletion } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
@@ -77,7 +78,17 @@ export interface CallCaller {
   runId?: string;
 }
 
+/** Created only by the app's grant owner, never deserialised from a wire request. */
+export interface HostAdmittedOrigin {
+  type: 'venice';
+  runId: string;
+  sessionId: string;
+  roots: Root[];
+  current(): boolean;
+}
+
 export interface CallContext {
+  origin?: HostAdmittedOrigin;
   /** Presentation witness captured at admission; never consumed by caller/permission routing. */
   recordingContext?: import('../session/recorder.js').RecordingContext | null;
   /** Result publication belongs to the transport, not to the generation-wide request ID. */

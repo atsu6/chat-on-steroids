@@ -1056,3 +1056,56 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - ビルド・GUI起動・bridge応答の確認は完了。native Desktopが必要な段階では、別scriptのビルドを確認する。
 - 上記の実測結果を記録し、追加指示に基づいて本findingsのみローカルcommitする。
   ビルド・起動の再実行、Veniceへの送信、pushは行わない。
+
+## 2026-11-24 — POST /venice/tools と core/read の縦接続
+
+### 分かったこと
+
+- `pwd` と直近3 commitを確認した。開始HEADは `13f9929a`、続く履歴は `00ce8fb2` / `6cc6823c`。
+  AGENTS.mdのElectron統合範囲と採用A案に従い、readだけを実装した。
+- `venice-tool-gateway.ts` がcall IDを最初のawait前に予約し、既存durable storeで受付を副作用前に保存する。
+  同一要求は進行中の処理または保存結果に合流し、別payload/所有者の同じIDは拒否する。
+  受付・結果の保存失敗、再起動でpendingが残った場合はunknownとして再実行しない。
+- `kernel.ts::invokeHostAdmitted` とcall-contextのoriginを追加した。既存read schema/handlerとsandboxを使い、
+  read capability・read-only・canonical root・symlinkを検証する。grant外の暗黙Skill rootや別chatのcwdは持ち込まない。
+  app許可済みのローカルsessionへ `host_admitted` として記録し、ChatGPTのrequest/conversation IDは捏造しない。
+- POST `/venice/tools` は既存bearer/protocol/Origin検証の内側に追加した。browser IDは既存header、
+  tab/document IDはbackgroundのChrome MessageSenderから取得してgrantと照合する。
+- 一時IPCは `venice:debugGrant` の1本でgrant/revokeを扱う。development・非packaged・app main frameだけを許可する。
+  session IDと既存承認root、Chromeから取得したsenderを受け取り、appがrun IDを発行する。承認UIやroot追加機能は作らない。
+- `executeTool('core/read', args)` は既存の `{ok:true,result}` / `{ok:false,error}` を維持する。
+  transport失敗/pending時は同じcall IDで1回だけ再取得し、unknownでは新しい実行を始めない。
+  他のブラウザtoolは従来経路のまま。shell・patch・find・Desktopは公開せず、desktopUnattributedも有効化しない。
+- 通常アプリを終了し、`CLF_BRIDGE_PORTS=8766 npm run dev` にElectronの専用user-data-dir引数を加えて起動した。
+  source extensionを読み込んだ隔離Chrome for Testingの実VeniceページとElectron rendererのConsoleから確認した。
+  `ELECTRON_CLI_ARGS`環境変数はCLIに上書きされたため、最終起動は `npm run dev -- -- --user-data-dir=...` を用いた。
+- 許可rootの小さい合成ファイルから `VENICE_LOCAL_READ_OK` と本文が返った。
+  別の承認rootだがgrant外のファイルは拒否され、その本文は返らなかった。
+  同じcall IDを2回送ると同一結果となり、該当IDのdurable台帳は1レコードだった。
+  debug IPCでrevoke後、新しいcall IDは `RUN_REVOKED` で拒否された。
+- 実測時の `/hello` はapp `chat-on-steroids`、version `2.1.54`、bridge protocol `15`、paired:true。
+  実測用grantは失効済み。開発アプリは8766で稼働し、通常アプリは終了したままにする。
+- 型チェックとnode --checkが成功した。gateway実装テスト9件、既存モデル/隣接workspaceテスト、
+  拡張の従来33件＋local read 5件、関連MCP/IPC/identity/shieldテストが成功した。
+  production/packaged/別sender/iframeからのdebug IPC拒否も検証した。
+- `npm run verify` を実行した。最初の全体結果は530ファイル中507成功・4失敗・19skip、
+  テストは12,742成功・4失敗・194skipだった。新IPCの大文字error codeによるi18n失敗1件は
+  既存規約のsnake_case codeへ修正し、i18n/IPC 262件と型チェックを再実行して成功した。
+- 残る3件は `extension-i18n.test.ts`（先頭ISOLATED script）、`extension-popup.test.ts`（manifest名）、
+  `firefox-extension-package.test.ts`（既存venice-panel.jsのinnerHTML）。失敗対象のmanifest/panelと当該testは
+  HEADから無変更であることを確認した。今回のread接続では変更しない。
+- 生ログ・Console結果・再現用scriptはGit除外の `outputs/venice-read-live/` に保存した。
+  実行したのはConsoleのlocal toolだけで、runTask/sendViaUiは呼んでいない。モデルへの送信・pushはしない。
+  根拠は実装テストと上記のConsole/台帳。新しいVenice推論通信のrecord番号はない。
+
+### 不明なこと
+
+- 全体verifyは残る既存3件のためgreenではなく、後続のcomputer/mcp-shutdown単独phaseは実行されていない。
+- debug grantとパネルのStop/完了の自動連動、正式な承認UI、provider sessionの全面統合、画像/書込/shell/Desktopは未実装。
+  現段階の失効は明示revoke・Disconnect・app終了。別documentは以前のrun設定を継承しない。
+- 既知のprivate endpointの403、規約解釈、認証/attestation、provider側の履歴保持、Content-Typeは未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- read接続の確認は完了。使用手順・一時IPC・sender指定・失効と現在の制限は統合計画§10を参照する。
+- 全体verifyの既存3件を解消する作業は別途扱う。今回のcommitにはread接続と関連テスト・文書だけを含める。

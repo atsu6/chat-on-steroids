@@ -116,6 +116,9 @@ export interface SessionDetail {
 }
 
 const api = {
+  debugVeniceGrant: (payload: { action: 'grant'; sessionId: string; roots: string[];
+    sender: { browserId: string; tabId: number; documentId: string } } | { action: 'revoke'; runId: string }) =>
+    call<{ runId?: string; revoked?: boolean }>('venice:debugGrant', payload),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */

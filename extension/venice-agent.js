@@ -2,6 +2,7 @@ const CONTRACT = `あなたは作業用タブのDOMを操作するエージェ�
 {"action":"tool","name":"<name>","args":{...}}
 {"action":"done","summary":"<完了報告>"}
 利用可能なツール:
+core/read({paths, start_line?, end_line?, max_bytes?}) -> appで許可したroot内のファイルを読む。appのgrantが必要
 now() -> 現在時刻のISO文字列
 tab_open({url}) -> 作業用タブを作成または指定URLへ遷移してURLを返す。DOMツールの前に実行する
 query({selector}) -> 件数と最大20件の番号・tagName・id・クラス先頭・テキスト先頭40文字
@@ -128,7 +129,25 @@ function callVeniceBridge(op, args = {}) {
   });
 }
 
+// A transport retry reuses the callId. An unknown outcome is terminal, never a new read.
+async function readLocalTool(args = {}) {
+  const request = {callId: crypto.randomUUID(), surface: 'core', tool: 'read', args};
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
+    try { response = await callVeniceBridge('localTool', request); }
+    catch (error) { if (attempt === 0) continue; throw new Error(`${error.message} (callId=${request.callId})`); }
+    if (!response || response.callId !== request.callId) throw new Error('Invalid local tool response');
+    if (response.state === 'pending' && attempt === 0) continue;
+    if (response.state !== 'completed' || response.error) {
+      throw new Error(`${response.error || response.state || 'unknown'} (callId=${request.callId})`);
+    }
+    if (response.result?.isError) throw new Error(response.result.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || 'Local read failed');
+    return response.result;
+  }
+}
+
 const TOOL_REGISTRY = Object.freeze({
+  'core/read': readLocalTool,
   now: () => new Date().toISOString(),
   tab_open: async ({url} = {}) => (await callVeniceBridge('ensureTab', {url})).url,
   query: (args = {}) => callVeniceBridge('eval', {name: 'query', args}),
@@ -153,7 +172,9 @@ async function executeTool(name, args) {
 if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
   const __agent = createAgent(text => window.__cosVeniceSend.sendViaUi(text));
   window.__cosVeniceAgent = Object.freeze({
-    runTurn: __agent.runTurn, runTask: __agent.runTask, stopTask: __agent.stopTask, executeTool, TOOL_REGISTRY, buildTurn, parseAction
+    runTurn: __agent.runTurn, runTask: __agent.runTask, stopTask: __agent.stopTask, executeTool, TOOL_REGISTRY, buildTurn, parseAction,
+    localIdentity: () => callVeniceBridge('localIdentity'),
+    setLocalRun: runId => callVeniceBridge('setLocalRun', {runId})
   });
   const origin = 'https://venice.ai';
   let panelRunId = null;

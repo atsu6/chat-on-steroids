@@ -2,14 +2,15 @@
 
 初回調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、調査時HEAD `ffa8acac`。
 同日にA案を採用し、`6cc6823c` を基点にwire型・契約コメントと合成モデルテストを追加した。
-RPC・gateway・ツール実行・承認UIの実装は次段階。アプリ起動・ブラウザ操作・Veniceへの送信は行っていない。
+現在は `/venice/tools` → host-admitted kernel → `core/read` の縦接続を実装し、Consoleで実測済み。
+承認UIは未実装で、開発モードの一時grant IPCを使う。モデルへの送信は行っていない。
 以下のパスはこのリポジトリを基準とし、既存ソースの行番号は初回調査時点のもの。
 
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
-ただし、現在のbridgeにファイル・シェルを実行する入口はない。新しい信頼境界の設計と実装が必要になる。
+現在のbridgeにはgrant付き `core/read` の入口がある。shell・書込・Desktopはこの入口に公開していない。
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
-今回の作業範囲は型・契約・合成テスト・文書のみで、最初の実接続は `read` のみにする。
+今回の実装範囲は `read` の縦接続・開発用grant・関連テストと文書までとする。
 
 ## 1. agent map の要約（8行）
 
@@ -39,7 +40,7 @@ wireの事実は現行ソースを優先した。現行はapp 2.1.54 / bridge pr
 | MCP | `src/main/mcp/server.ts:268` の `startMcpServer(...)`。別のloopback HTTP listener。通常OS割当ポート、保持済みポートの再利用指定も可能。`/mcp/{core,desktop,plugins}/<surface別secret>` でMCPを受ける。bridge tokenとは別の認証で、ブラウザ拡張用RPCではない。 |
 | Local control API | `src/main/control-api.ts:154`付近。別のOS割当loopbackポート。opt-in、起動ごとのtoken。既存状態の参照と限定されたsend/cancel/stop用であり、汎用ファイル・shell実行の入口ではない。 |
 
-**現在のVenice専用ブリッジはElectronへ接続していない。**
+**従来のVenice専用ブリッジは作業タブDOM用。現在のlocalTool分岐は§10の経路でElectronへ接続する。**
 
 ```text
 Venice MAIN: venice-agent.js / runTask → executeTool → callVeniceBridge
@@ -52,7 +53,8 @@ background.js: handleVeniceBridge(message, sender)
 ```
 
 `extension/background.js:5766`付近で送信元extension ID、top frame、Venice origin、
-現在の脳タブURLを検証する。現在のopは `ensureTab` / `eval` / `activate` / `close`。
+現在の脳タブURLを検証する。DOM用opは `ensureTab` / `eval` / `activate` / `close`。
+local tool用に `localIdentity` / `setLocalRun` / `localTool` を追加した（§10）。
 `venice-agent.js` のMAIN側はChrome APIもbridge tokenも持たない。
 
 ### 2.2. 認証・ペアリング
@@ -266,7 +268,7 @@ TypeScriptの型はwire入力を検証しないため、将来のgatewayには�
 
 `test/venice-integration.test.ts` はこの遷移の実行可能な仕様である。
 メモリ上の疑似journal、遅延できる保存応答、実行回数spyで契約を検証する。
-appのgateway、実ディスク永続化、送信元認証、再起動からの復元を検証するものではない。
+このモデル自体はappのgatewayや実ディスクを検証しない。後続の実装テストとConsole実測は§10を参照。
 
 ## 6. A案とB案の比較
 
@@ -343,9 +345,9 @@ Bへ移る判断点は「脳タブ再読込をまたぐtask継続」や「appの
 - private endpointの403原因、attestation/認証の要否、規約解釈、provider側の履歴保持、既知のContent-Type問題は
   未解明のまま引き継ぐ。ADRのprivate endpoint再送停止を維持し、今回の調査で送信再開は承認しない。
 
-## 9. 今回の変更対象と承認UIの文言案
+## 9. 契約定義段階の変更対象と承認UIの文言案
 
-### 今回は4ファイルだけを変更する
+### 型・契約定義段階の4ファイル
 
 | ファイル | 今回の内容 |
 | --- | --- |
@@ -389,4 +391,87 @@ shellの許可を「承認フォルダー内だけの操作」と説明したり
 
 **停止時の文言:** 「新しい呼び出しを停止しました。開始済みのコマンドは自動終了しません。」
 
-これらは文言案であり、今回IPC・UI部品・送信・実行機能は追加していない。
+これらは将来の承認UIの文言案。現在のread接続は§10の開発用IPCで許可し、UIは追加していない。
+
+## 10. core/readの縦接続（2026-11-24実装）
+
+```text
+MAIN executeTool('core/read', args)
+ → ISOLATED venice-bridge.js → backgroundのlocalTool分岐
+ → 認証済みPOST /venice/tools {sender:{tabId,documentId}, request:VeniceToolCallRequest}
+ → venice-tool-gatewayの予約・永続化
+ → createRegistrar(...).invokeHostAdmitted('read', args, appが作ったorigin)
+ → 既存read schema/handler → 既存sandbox → ToolResult → 既存の{ok,result}/{ok,error}
+```
+
+browser IDは既存の認証付きextension headerから、tab/document IDはbackgroundのChrome MessageSenderから取る。
+MAINが指定したsenderは転送しない。gatewayはその3つとappのgrantを照合し、`core/read`以外を拒否する。
+host-admitted originは既知のローカルsessionへ帰属し、履歴のattributionは `host_admitted`。
+ChatGPTのrequest-idを捏造せず、ChatGPTのinbox・自動継続・Desktop経路へは入らない。
+ファイルのschema・capability・read-only適用・canonical root/symlink検証は既存実装を再利用する。
+user/managed Skillの暗黙rootや別chatの学習cwdはこの経路へ持ち込まない。
+
+### grantを作る一時IPC
+
+`api.debugVeniceGrant(...)` は `venice:debugGrant` という1つのIPC channelだけを使う。
+非packagedかつElectron-vite development、app本体のmain frameだけが呼べる。
+`grant` と `revoke` の2操作を持ち、production/packaged/別sender/iframeは `venice_debug_disabled` で拒否する。
+shell許可・設定変更・rootの新規承認は行わず、すでに承認済みのnamed root全体を選ぶ。
+sessionはChatGPTに結び付いていないローカルsessionに限定し、未作成の合成debug session IDなら作成する。
+
+実測では通常アプリを終了し、次のように専用profileで起動した。`--`以降をElectronへ渡すことが必要。
+`ELECTRON_CLI_ARGS`環境変数だけの指定はelectron-vite CLIに上書きされたため使わない。
+
+```sh
+CLF_BRIDGE_PORTS=8766 npm run dev -- -- --user-data-dir=/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime
+```
+
+ソース拡張を読み込んだVeniceタブのConsoleで、実際のsenderを取得する。モデル送信は行わない。
+
+```js
+await window.__cosVeniceAgent.localIdentity()
+```
+
+その戻り値をElectron Consoleの変数 `sender` に設定してから、grantを発行する。
+以下のroot名と合成session IDは実測用。root名は使用する既存の承認rootに合わせる。
+
+```js
+const granted = await api.debugVeniceGrant({
+  action: 'grant', sessionId: '2026-11-24-11111111', roots: ['/venice-test'], sender
+});
+// granted.ok === true のときだけ granted.data.runId を次のConsoleへ渡す。
+```
+
+Venice Consoleでapp発行のIDを `runId` に設定してから読む。
+
+```js
+await window.__cosVeniceAgent.setLocalRun(runId)
+await window.__cosVeniceAgent.executeTool('core/read', {
+  paths: ['/venice-test/small.txt']
+})
+```
+
+同じcall IDの再取得を手動確認する場合は、MAINのbridge関数を同じrequestで呼ぶ。
+
+```js
+const request = {callId: crypto.randomUUID(), surface: 'core', tool: 'read',
+  args: {paths: ['/venice-test/small.txt']}};
+await callVeniceBridge('localTool', request)
+await callVeniceBridge('localTool', request) // 同じ記録。readを再実行しない。
+```
+
+Electron Consoleで `await api.debugVeniceGrant({action:'revoke', runId})` を実行すると、新規callは `RUN_REVOKED` になる。
+既存の同一要求の結果取得は、同じ認証済みbrowser/tab/documentだけに許可する。
+通常のexecuteToolは最初にcall IDを作り、transport失敗/pending時には同じIDで1回だけ再取得する。
+unknownは停止理由として返し、新しいcall IDを作ってやり直さない。
+
+### 状態の所有者と現在の制限
+
+- gatewayの `state/venice-tools.json` が受付とresponse cacheを所有する。受付保存前は実行せず、完了保存後に応答する。
+  再起動時のpendingはunknownにし、再実行しない。grantはプロセス内のみで、再起動後の新規実行権限として復元しない。
+- 保存上限は256 call、プロセス内予約512件、grant32件、1結果のJSONは1,000,000 bytes。
+  上限到達は明示的な拒否/エラーとし、過去のcall IDを忘れて再実行できるようにはしない。
+- grantの明示revoke・bridge Disconnect・app終了で新規実行を止める。別documentは以前のrun設定を継承しない。
+  このdebug grantとパネルのtask Stop/完了の自動連動、承認UIとsession/providerの本格統合は後段階。
+- `desktopUnattributed`を有効にせず、shell・patch・find・Desktop・画像添付は公開しない。
+  テキストreadの縦接続までを確認し、画像をモデルが見られるという扱いにはしない。

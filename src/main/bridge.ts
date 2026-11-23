@@ -1,3 +1,4 @@
+import { veniceToolGateway, veniceSenderSchema } from './venice-tool-gateway.js';
 import { modelSelectionDiagnostic, type ModelSelectionDiagnostic } from '../shared/model-selection-diagnostic.js';
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
@@ -1691,6 +1692,7 @@ export async function unpair(): Promise<void> {
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
   ++browserCredentialEpoch;
+  veniceToolGateway.revokeAll();
   cosSignInTransfer.cancel();
   await withBrowserCredentials(async () => {
     await setSecret('bridgeToken', BROWSER_DISCONNECTED);
@@ -3353,6 +3355,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // consume the browser's shared budget before failing origin/authentication.
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
   if (noteBrowserSeen(req)) changed();
+
+  if (route === '/venice/tools' && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    const source = body && typeof body === 'object' ? body.sender : null;
+    const parsed = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
+    if (!parsed.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
+    try {
+      return json(res, 200, await veniceToolGateway.call(body.request, parsed.data), origin);
+    } catch {
+      return json(res, 400, { error: 'invalid_venice_request' }, origin);
+    }
+  }
 
   // Only an explicit login operation accepts a session. Never put cookies in diagnostics,
   // command journals, status snapshots, recorder events or HTTP error descriptions.
