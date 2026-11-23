@@ -40,10 +40,32 @@ fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの
 
 他の4つは境界の宣言のみ。コールバックのペイロード、完了判定、モデル選択の実装は（空欄・不明）。
 
+## 脳タブの操作パネル
+
+拡張機能とVeniceタブを再読み込みすると、ページ右下に「Chat On Venice」が表示される。
+指示を入力し、最大ステップ数（既定10、1〜40）を指定して「実行」を押す。
+コンソールを開く必要はない。読み込みだけではタスクを開始しない。
+
+完了したステップは、連番 / ツール名 / ok / 結果の先頭60文字を1行ずつ表示する。
+長い行はログ内で横スクロールできる。doneでは最終summary、失敗時はエラーを表示する。
+実行中は指示と上限の編集・再実行を無効にし、「停止」を有効にする。
+停止は「停止要求中」→ MAINの受付後に「停止待ち」→「停止」と表示する。
+送信やツールの実行中に止めた場合、その処理は中断せず、完了を待って次の処理へ進む前に止める。
+「畳む / 開く」は実行状態を保ったまま表示だけを切り替える。
+
+`venice-panel.js` はVenice限定の ISOLATED / document_startで登録し、bodyの準備後に
+Shadow DOM内へ描画する。ページ側のChakra等のスタイルをパネルへ取り込まない。
+パネルとMAINは `window.postMessage` で通信し、両側で同じwindowとVenice originを確認する。
+固定typeは `cos-venice-panel-request`（ready / run / stop）と `cos-venice-panel-event`。
+実行ごとのidで進捗と停止を対応付け、MAINが `window.__cosVeniceAgent.runTask` を呼ぶ。
+別のidの停止要求は受け付けない。同一Veniceページ内のJavaScriptを隔離する認証境界ではない。
+
+合成ページの表示: [PC・ライト](screenshots/venice-panel-desktop.png) / [モバイル・ダーク](screenshots/venice-panel-mobile.png)。
+
 ## DOMツールとタスク実行（ローカル合成検証済み）
 
 `extension/venice-agent.js` はVenice用MAIN / document_startで読み込まれ、
-`window.__cosVeniceAgent` に `runTurn`、`runTask`、`executeTool` を公開する。
+`window.__cosVeniceAgent` に `runTurn`、`runTask`、`stopTask`、`executeTool` を公開する。
 読み込みだけでは送信もタスク実行もしない。
 
 `executeTool(name, args)` は成功時 `{ok: true, result}`、登録済みツールの失敗時は
@@ -78,7 +100,7 @@ DOMツールの前に `tab_open` を実行する。作業タブがない場合�
 `{ok: false, error: '作業タブがありません。先に tab_open(url) を実行してください。'}` を返す。
 別のタブやVeniceタブへフォールバックしない。
 
-`runTask(instruction, {maxSteps?})` は毎ステップ、同じ指示と直前のツール結果で
+`runTask(instruction, {maxSteps?, onStep?})` は毎ステップ、同じ指示と直前のツール結果で
 `runTurn` を呼ぶ。既定10ステップ、40超の指定は40に制限する。
 正の整数以外は送信前に例外になる。
 `tool` は `executeTool` の結果を次へ渡し、失敗・未登録名も `ok: false` の結果として渡す。
@@ -87,9 +109,19 @@ DOMツールの前に `tab_open` を実行する。作業タブがない場合�
 上限内に `done` がなければ、件数と最後のactionを含む例外を投げる。
 例外の `stepCount`、`lastAction`、`steps` から経過も参照できる。
 
+任意の `onStep` はtool / doneの各完了時に同期的に呼ぶ。第1引数は1始まりの `{index, name, ok}`、
+第2引数は結果（doneではsummary）の空白を畳んだ先頭60文字。既存の `{summary, steps}` と
+steps内の `{name, ok}` は変更しない。
+`stopTask()` は実行フラグをfalseにし、タスクがあればtrue、なければfalseを返す。
+停止受付後は新しい送信・JSON再出力・ツール実行へ進まない。実行中の処理は中断しない。
+停止はcodeが `VENICE_TASK_STOPPED` の例外で通知し、`steps` / `stepCount` に完了済みの経過を持つ。
+同じエージェントでrunTaskを重複実行すると例外になる。終了・停止・失敗後は再実行できる。
+
 2026-11-23のユーザー実行報告では、runTaskのtab_open・作業タブのquery / read_textが動作し、
 h1不在の報告からdoneに至った（stepsは4件、tab_openはok=true）。詳細はfindingsの成功記録を参照。
-今回追加のfill / press / wait / activateは合成DOM・合成モデル応答で検証している。
+2026-11-24にはtab_open → fill → press → wait → read_text → doneの6ステップすべてok=trueで完走し、
+Enterで遷移しないことの正しい診断とh1の実テキスト報告、記録器修正の有効性もユーザーから報告された。
+新しい操作パネルは合成ページ・合成モデル応答で検証している。
 
 ## MAINから作業タブへのブリッジ
 
@@ -129,11 +161,16 @@ cd /Users/atsu/chat-on-venice
 node --check extension/background.js
 node --check extension/venice-bridge.js
 node --check extension/venice-agent.js
+node --check extension/venice-panel.js
 node --check test/venice-agent.test.cjs
 node --check test/venice-bridge-harness.cjs
 node --check test/venice-bridge.test.cjs
 node --check test/venice-input.test.cjs
-node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-input.test.cjs test/venice-ui-send.test.cjs
+node --check test/venice-panel.test.cjs
+node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-input.test.cjs test/venice-panel.test.cjs test/venice-ui-send.test.cjs docs/venice-recon.test.cjs
+# 任意の画面確認。ホストに既存のPlaywrightとGoogle Chromeがある環境で実行する。
+# ページ通信はローカル応答/遮断に置き換え、実Veniceへは送信しない。
+node test/venice-panel.visual.cjs
 ```
 
 ## 取得済みSSEのオフライン解析

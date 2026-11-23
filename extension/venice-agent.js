@@ -34,10 +34,17 @@ function parseAction(text) {
 
 // Inject the UI transport; importing this module never sends a turn.
 function createAgent(sendViaUi) {
-  async function runTurn(instruction, toolResult) {
+  let taskState = null;
+  function stopTask() {
+    if (!taskState) return false;
+    taskState.running = false;
+    return true;
+  }
+  async function runTurn(instruction, toolResult, beforeRetry = () => {}) {
     let raw = await sendViaUi(buildTurn(instruction, toolResult));
     let parsed = parseAction(raw);
     if (parsed === null) {
+      beforeRetry();
       raw = await sendViaUi(buildTurn(instruction, 'JSONのみで再出力してください。'));
       parsed = parseAction(raw);
     }
@@ -48,31 +55,51 @@ function createAgent(sendViaUi) {
 
   async function runTask(instruction, options = {}) {
     const requested = options.maxSteps ?? 10;
-    if (!Number.isInteger(requested) || requested < 1) {
-      throw new TypeError('maxSteps must be a positive integer');
-    }
-    const maxSteps = Math.min(requested, 40);
-    const steps = [];
+    if (!Number.isInteger(requested) || requested < 1) throw new TypeError('maxSteps must be a positive integer');
+    if (options.onStep !== undefined && typeof options.onStep !== 'function') throw new TypeError('onStep must be a function');
+    if (taskState) throw new Error('タスクは既に実行中です。');
+    const maxSteps = Math.min(requested, 40), steps = [];
+    const state = {running: true};
+    taskState = state;
+    const checkRunning = () => {
+      if (state.running) return;
+      const error = new Error('タスクを停止しました。');
+      Object.assign(error, {code: 'VENICE_TASK_STOPPED', steps: steps.slice(), stepCount: steps.length});
+      throw error;
+    };
+    const report = (name, ok, value) => {
+      steps.push({name, ok});
+      const preview = (typeof value === 'string' ? value : JSON.stringify(value) ?? '').replace(/\s+/g, ' ').slice(0, 60);
+      options.onStep?.({index: steps.length, name, ok}, preview);
+    };
     let previous, lastAction;
-    for (let i = 0; i < maxSteps; i++) {
-      lastAction = await runTurn(instruction, previous);
-      if (lastAction.action === 'done') {
-        steps.push({name: 'done', ok: true});
-        return {summary: lastAction.summary, steps};
+    try {
+      for (let i = 0; i < maxSteps; i++) {
+        checkRunning();
+        lastAction = await runTurn(instruction, previous, checkRunning);
+        // Let an in-flight send finish, but do not begin its tool after a stop request.
+        checkRunning();
+        if (lastAction.action === 'done') {
+          report('done', true, lastAction.summary);
+          return {summary: lastAction.summary, steps};
+        }
+        try {
+          previous = await executeTool(lastAction.name, lastAction.args);
+        } catch (error) {
+          previous = {ok: false, error: error.message};
+        }
+        report(lastAction.name, previous.ok, previous.ok ? previous.result : previous.error);
       }
-      try {
-        previous = await executeTool(lastAction.name, lastAction.args);
-      } catch (error) {
-        previous = {ok: false, error: error.message};
-      }
-      steps.push({name: lastAction.name, ok: previous.ok});
+      checkRunning();
+      const error = new Error(`runTask exceeded maxSteps: steps=${steps.length}, lastAction=${JSON.stringify(lastAction)}`);
+      Object.assign(error, {stepCount: steps.length, lastAction, steps});
+      throw error;
+    } finally {
+      taskState = null;
     }
-    const error = new Error(`runTask exceeded maxSteps: steps=${steps.length}, lastAction=${JSON.stringify(lastAction)}`);
-    Object.assign(error, {stepCount: steps.length, lastAction, steps});
-    throw error;
   }
 
-  return {runTurn, runTask};
+  return {runTurn, runTask, stopTask};
 }
 
 // MAIN has no Chrome APIs. Only the Venice ISOLATED bridge can forward this request.
@@ -126,6 +153,35 @@ async function executeTool(name, args) {
 if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
   const __agent = createAgent(text => window.__cosVeniceSend.sendViaUi(text));
   window.__cosVeniceAgent = Object.freeze({
-    runTurn: __agent.runTurn, runTask: __agent.runTask, executeTool, TOOL_REGISTRY, buildTurn, parseAction
+    runTurn: __agent.runTurn, runTask: __agent.runTask, stopTask: __agent.stopTask, executeTool, TOOL_REGISTRY, buildTurn, parseAction
   });
+  const origin = 'https://venice.ai';
+  let panelRunId = null;
+  const postPanel = (id, event, payload = {}) => window.postMessage({
+    type: 'cos-venice-panel-event', id, event, ...payload
+  }, origin);
+  window.addEventListener('message', event => {
+    if (event.source !== window || event.origin !== origin || event.data?.type !== 'cos-venice-panel-request') return;
+    const message = event.data;
+    if (message.op === 'ready') { postPanel(null, 'ready'); return; }
+    if (typeof message.id !== 'string' || !message.id) return;
+    if (message.op === 'stop') {
+      if (message.id === panelRunId && window.__cosVeniceAgent.stopTask()) postPanel(message.id, 'stopping');
+      return;
+    }
+    if (message.op !== 'run') return;
+    if (panelRunId) { postPanel(message.id, 'error', {error: 'タスクは既に実行中です。'}); return; }
+    if (typeof message.instruction !== 'string' || !message.instruction.trim()) {
+      postPanel(message.id, 'error', {error: '指示を入力してください。'}); return;
+    }
+    panelRunId = message.id;
+    postPanel(message.id, 'started');
+    window.__cosVeniceAgent.runTask(message.instruction, {
+      maxSteps: message.maxSteps,
+      onStep: (step, preview) => postPanel(message.id, 'step', {step, preview})
+    }).then(result => postPanel(message.id, 'done', {summary: result.summary}), error => {
+      postPanel(message.id, error.code === 'VENICE_TASK_STOPPED' ? 'stopped' : 'error', {error: error.message});
+    }).finally(() => { panelRunId = null; });
+  });
+  postPanel(null, 'ready');
 }
