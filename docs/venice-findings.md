@@ -786,3 +786,35 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 ### 次に確認したいこと
 
 - 今回の成功記録に伴う追加確認はなし。findingsの追記をローカルcommitし、送信・pushは行わない。
+
+## 2026-11-24 — 入力・キー・待機・アクティブ化ツール（実送信なし）
+
+### 分かったこと
+
+- backgroundのVenice専用関数表と `venice-agent.js` にfill / press / waitを追加した。
+  既存のISOLATEDブリッジ経由で作業タブに実行する。activateは既存backgroundのactivate操作へ接続した。
+  CONTRACTは既存ツールを含め、1行1ツールを維持した。
+- fillは対象をscrollIntoViewし、プロトタイプ上のvalue setterで文字列を設定してから、
+  bubbles付きinput / changeを順に送る。input / textarea / selectと、空文字によるクリアを合成検証した。
+  要素なし・value setterなしはok=false。入力した本文はツール結果に含めない。
+- pressは指定要素に、keyを保ったkeydown / keypress / keyupを順に送る。
+  bubbles / composed付き、isComposing=falseで、Enterには既存senderと同じcode / keyCode等も設定する。
+- waitは作業タブのタイマーで待ち、0以上の有限数値を受け付ける。10000msを超える指定は10000msへ制限し、
+  適用した待機指定値を `{ms}` で返す。activateは保存された作業タブだけをactive=trueにする。
+  作業タブがない場合は4ツールとも既存の「先にtab_open」エラーを返す。
+- 実装2ファイルと `test/venice-input.test.cjs` のnode --checkが成功した。
+  `node --test test/venice-input.test.cjs test/venice-agent.test.cjs test/venice-bridge.test.cjs` は50件成功。
+  値設定とイベント、キー送出、仮想タイマーでの待機と上限、activateの宛先、
+  1行1ツールのCONTRACT、runTaskからの新ツール連続実行を確認した。
+- 根拠はローカル合成テスト。今回の実送信・実ブラウザ操作は0回で、新しいcapture / record番号はない。
+
+### 不明なこと
+
+- 新しい入力・キーイベントが実際の対象ページでどう処理されるかは未検証。
+  実ブラウザのタイマー抑制等による実待機時間も未検証。msは待機指定値であり実測値ではない。
+- 既知のprivate endpointの403原因、規約解釈、認証等の不明点は未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 実ブラウザで確認する際は、非機密の作業ページで入力値・イベント処理・アクティブ化を確認する。
+  今回は合成検証とローカルcommitまでで停止し、送信・pushはしない。

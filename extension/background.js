@@ -5689,6 +5689,54 @@ const VENICE_DOM_TOOLS = Object.freeze({
       return {ok: false, error: error.message};
     }
   },
+  fill: function ({selector, value} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      if (typeof value !== 'string') throw new TypeError('value must be a string');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      element.scrollIntoView({block: 'center', inline: 'nearest'});
+      let prototype = Object.getPrototypeOf(element), setter;
+      while (prototype && !setter) {
+        setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        prototype = Object.getPrototypeOf(prototype);
+      }
+      if (!setter) throw new Error('Element has no value setter');
+      setter.call(element, value);
+      element.dispatchEvent(new Event('input', {bubbles: true}));
+      element.dispatchEvent(new Event('change', {bubbles: true}));
+      return {ok: true, result: {filled: true}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  press: function ({selector, key} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      if (typeof key !== 'string' || !key) throw new TypeError('key must be a non-empty string');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      for (const type of ['keydown', 'keypress', 'keyup']) {
+        element.dispatchEvent(new KeyboardEvent(type, {
+          key, bubbles: true, cancelable: true, composed: true, isComposing: false,
+          ...(key === 'Enter' ? {code: 'Enter', keyCode: 13, charCode: type === 'keypress' ? 13 : 0, which: 13} : {})
+        }));
+      }
+      return {ok: true, result: {pressed: true, key}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  wait: async function ({ms} = {}) {
+    try {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) throw new TypeError('ms must be a non-negative finite number');
+      const delay = Math.min(ms, 10_000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return {ok: true, result: {ms: delay}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
 });
 
 // Navigation must settle before the next eval can read the destination rather than the old page.
