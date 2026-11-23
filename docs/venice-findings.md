@@ -1013,3 +1013,46 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - 次の実装段階で、appの許可記録と実際のtab/documentを照合し、既存kernel経由のreadだけを接続する。
   今回の契約モデルを実gatewayのテストへ適用し、同時受付・保存失敗・失効を実装に対して確認する。
 - 今回はローカルcommitまで。アプリ起動・ブラウザ操作・実送信・pushは行わない。
+
+## 2026-11-24 — ビルドとElectron起動の確認（ソース変更なし）
+
+### 分かったこと
+
+- `/Users/atsu/chat-on-venice` でpwdと直近logを確認した。開始HEADは `00ce8fb2`、
+  続く履歴は `6cc6823c` / `ffa8acac`。src/native/package.json/package-lock.jsonは変更していない。
+- package scriptsでは `npm run build` がelectron-viteによるmain/preload/rendererのビルド、
+  `npm run dev` が開発ビルドと起動。既存ビルドを直接起動する入口は `node_modules/.bin/electron .`。
+  macOS DesktopのSwift/helper/dylib/Node addonは別の `npm run desktop:mac`。
+- `npm ci --no-audit --no-fund` は終了コード0、678パッケージを導入した。
+  Node v24.8.0 / npm 11.6.0で、一部のdev依存にNode 24.15.0以上等を要求するEBADENGINE警告と
+  deprecated警告が出たが、導入は成功した。lockfileは変更していない。
+- `npm run build` は終了コード0で完了した。Swift/Node addonのビルドはこのscriptからは実行されず、
+  今回 `desktop:mac` は実行していない。nativeのコンパイル成否は未検証。
+- 通常版 `/Applications/Chat On Steroids.app` が既に8765を使用していたため、別のuser-data-dirで
+  今回のビルドを起動した。コマンドは
+  `env -u ELECTRON_RUN_AS_NODE CLF_DEBUG=1 ./node_modules/.bin/electron . --user-data-dir=/Users/atsu/chat-on-venice/outputs/build-startup-check-20261124/runtime`。
+  検証用Electronは8766で待ち受け、window loaded / renderer state readyを記録した。usableまで10.11秒。
+- 実ウィンドウのセットアップ画面をaccessibility treeとスクリーンショットで確認した。
+  起動時のエラーダイアログはなく、dialog surfacesは空。npm/build/startupログにエラーはなかった。
+- `curl -s http://127.0.0.1:8766/hello` の実応答は
+  `{"app":"chat-on-steroids","version":"2.1.54","bridge":15,"compatible":null,"paired":false,"disconnected":false}`。
+  独立した新規プロファイルの検証用アプリは未ペアリング。通常版8765は同じapp/version/protocolで `paired:true`。
+  pair操作や拡張の接続先変更は行っていない。
+- Xcode 26.5（17F42）、CommandLineToolsディレクトリ、Apple Swift 6.3.2が存在する。
+  選択中のDeveloper directoryは `/Applications/Xcode.app/Contents/Developer`。
+- 結果を報告後、今回のElectronだけを通常終了した。shutdown sequence completeと8766のlistener消失を確認し、
+  通常版のプロセスと8765のpaired:trueは維持された。
+- 完全なログと画面はGit除外の `outputs/build-startup-check-20261124/` に保存した。
+  今回の証拠はローカルビルド・起動画面・loopbackのhello応答で、Veniceへの送信や新しい通信record番号はない。
+
+### 不明なこと
+
+- 今回のビルドと通常拡張との実ペアリング、native Desktopのコンパイル/実操作は未検証。
+  `/hello` のpairedは保存済みのpairing情報の有無であり、現在の拡張との疎通完了までは示さない。
+- 既知のVenice private endpointや認証等の未解明事項は今回の調査対象外として引き継ぐ。
+
+### 次に確認したいこと
+
+- ビルド・GUI起動・bridge応答の確認は完了。native Desktopが必要な段階では、別scriptのビルドを確認する。
+- 上記の実測結果を記録し、追加指示に基づいて本findingsのみローカルcommitする。
+  ビルド・起動の再実行、Veniceへの送信、pushは行わない。
