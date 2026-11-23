@@ -951,3 +951,33 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 使用時は拡張機能とVeniceタブを再読み込みしてパネルを表示する。
   今回は合成検証・描画確認・ローカルcommitまでで停止し、実送信・pushはしない。
+
+## 2026-11-24 — Electronの接続点とVenice統合計画（実装・送信なし）
+
+### 分かったこと
+
+- `/Users/atsu/chat-on-venice` の `pwd` と直近3 commitを確認した。調査開始HEADは `ffa8acac`。
+- 保存版agent mapを参照し、現行AGENTS.md・ADRとsrc/nativeの実装を照合した。
+  app 2.1.54 / bridge protocol 15。8765–8769等のbridgeはHTTP/JSONとwake-only WebSocketで、
+  local toolを実行するMCP listenerとは別。pairingはloopbackの自動token発行で、OS操作の同意ではない。
+- 現行Venice bridgeはMAIN→ISOLATED→background→作業タブまで。Electronへlocal toolを依頼するrouteはない。
+  Coreはregistrar/kernel経由でread・apply_patch・UnifiedExecProcessManager・searchを呼ぶ。
+  macOS Desktopはobserve/computerからcomputer/index.ts、Worker/N-API、SwiftのJSON dispatcherへ進む。
+- `docs/venice-integration-plan.md` に8行のmap要約、通信と認証、tool関数/呼び出し元、native入口、A/B比較を作成した。
+  A（拡張loop＋local tool RPC）を推奨し、app許可/正規callerの契約、readの縦接続、patch/shellへの拡張を最初の3ステップとした。
+  code候補19対25、直接testとdocs込み26対34は、画像添付まで含めた設計見積りであり実測diffではない。
+- 根拠は同設計書のソースパス/行番号。通信captureの追加はなく、対応するrecord番号はない。
+  今回は文書2ファイルだけを作成・更新し、実装・アプリ起動・実送信・pushは行わない。
+
+### 不明なこと
+
+- 稼働listener・pairing・local tool RPCの実動作は今回未検証。新RPC自体は未実装。
+- Venice chatの一意binding、画像添付UIのDOMと受付証拠、利用モデルのvision対応は未確認。
+  現行sendViaUiはtext専用で、screenshotを返すだけではモデルに画像を見せられない。
+- 既知の403原因、規約解釈、認証/attestation、provider側の履歴保持、Content-Typeは未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 次回は本書のsrc変更範囲とrun同意/caller契約の承認を得てから、合成応答とテスト用rootでreadの接続を実装する。
+  現行のsrc編集禁止をこの文書作成で解除しない。private endpoint再送停止を維持する。
+- 今回の成果物は文書チェックとローカルcommitまで。実送信・pushはしない。

@@ -1,0 +1,302 @@
+# Venice と Electron の接続計画
+
+調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、HEAD `ffa8acac` の作業ツリー。
+コード変更・アプリ起動・ブラウザ操作・Veniceへの送信は行っていない。
+以下のパスはこのリポジトリを基準とし、行番号は調査時点のもの。
+
+**推奨はA案: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
+完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
+ただし、現在のbridgeにファイル・シェルを実行する入口はない。新しい信頼境界の設計と実装が必要になる。
+`AGENTS.md` の現行規則では `src/` は編集禁止なので、本書の変更候補は次回承認用の提案である。
+
+## 1. agent map の要約（8行）
+
+1. Electronがローカルの作業場所・履歴・権限を所有し、モデル実行と会話UIはブラウザ側にある。
+2. Core・Desktop・Pluginsは別のMCP surfaceで、拡張用bridgeはさらに別の通信路である。
+3. 拡張は会話の観測とブラウザ操作を担当し、ローカルツールの実行結果はmain processが確定する。
+4. ツールはregistrar → kernel → 実装を通り、実行時の権限・呼び出し元・workspaceを検証する。
+5. ローカルsessionは永続的な作業IDであり、交換可能なproviderのconversation IDと区別する。
+6. ファイルの承認root・端末プロセスの所有者・desktopのframe/refは各所有者で検証する。
+7. 入力outbox・ブラウザcommand・ACK・記録は、それぞれの所有者と永続化順序を保って扱う。
+8. Goal/Loop・worker・Compact & Resumeも既存の状態所有者を持ち、不明な宛先や曖昧な送信を再実行で埋めない。
+
+資料は `docs/chat-on-steroids-agent-map.md`（保存版2.1.35）。現行規則は `AGENTS.md` §§1–22、
+wireの事実は現行ソースを優先した。現行はapp 2.1.54 / bridge protocol 15
+（`src/main/version.ts:15` と同ファイルの `BRIDGE_PROTOCOL`、`extension/background.js:59`）。
+保存版のLinux Desktop非対応という記述は現行のopt-in Linux実装とは異なる。本書のnative調査はmacOSを対象にする。
+
+## 2. 拡張とアプリの既存通信
+
+### 2.1. 待ち受けポートとプロトコル
+
+| 経路 | 現行実装・用途 |
+| --- | --- |
+| Browser bridge | `src/main/bridge.ts:3218` の `handle(req, res)`、`:6790` の `startBridge`、`:6841` の `prepareBridgeListener`。`127.0.0.1`限定のHTTP/JSON。Autoは8765–8769、次に18765–18769、38765–38769を順に試す。8765・8766・8767は機能別ポートではなく候補。設定の固定指定、`CLF_BRIDGE_PORTS`によるoverrideもある。 |
+| DiscoveryとHTTP client | `src/shared/browser-bridge.ts` と `src/main/bridge-ports.ts` が候補を定義。`extension/background.js:32` に同じ探索リスト、`:1234` の `call(path, init = {}, retried = false)` が認証付きHTTPを送る。 |
+| Wake socket | `src/main/browser-wake.ts:20` の `attachBrowserWake(...)`。bridgeと同じポートの `ws://127.0.0.1:<port>/wake`。`wake` / `browser-control` / `activity[:conversationId]` とheartbeat用 `ping` / `pong`。通知のみで、command本体・ツール実行・結果配信はHTTPのclaim/receiptが所有する。 |
+| MCP | `src/main/mcp/server.ts:268` の `startMcpServer(...)`。別のloopback HTTP listener。通常OS割当ポート、保持済みポートの再利用指定も可能。`/mcp/{core,desktop,plugins}/<surface別secret>` でMCPを受ける。bridge tokenとは別の認証で、ブラウザ拡張用RPCではない。 |
+| Local control API | `src/main/control-api.ts:154`付近。別のOS割当loopbackポート。opt-in、起動ごとのtoken。既存状態の参照と限定されたsend/cancel/stop用であり、汎用ファイル・shell実行の入口ではない。 |
+
+**現在のVenice専用ブリッジはElectronへ接続していない。**
+
+```text
+Venice MAIN: venice-agent.js / runTask → executeTool → callVeniceBridge
+  → window.postMessage(__cosVeniceBridge)
+Venice ISOLATED: venice-bridge.js
+  → chrome.runtime.sendMessage({type: 'cos-venice-bridge', id, op, args})
+background.js: handleVeniceBridge(message, sender)
+  → 作業タブへChrome APIでDOM操作
+  ← {ok:true, result} または {ok:false, error}
+```
+
+`extension/background.js:5766`付近で送信元extension ID、top frame、Venice origin、
+現在の脳タブURLを検証する。現在のopは `ensureTab` / `eval` / `activate` / `close`。
+`venice-agent.js` のMAIN側はChrome APIもbridge tokenも持たない。
+
+### 2.2. 認証・ペアリング
+
+- `GET /hello` は未認証の識別用。`{app, version, bridge, compatible, paired, disconnected}` を返す。
+- `POST /pair` は対応protocolを要求し、確認コードなしでloopback上の呼び出し元へtokenを発行する。
+  `reuse:true` は現世代のtokenを再利用し、明示reconnectはtokenを更新できる。
+  `randomBytes(32)` のbase64urlで、appは `secrets.ts` の暗号化保存、拡張は
+  `chrome.storage.local` に `{port, token, disconnected}` を保存する。
+- それ以外のHTTPは `Authorization: Bearer ...` と `x-extension-protocol: 15`。定時間比較、protocol一致、Origin検証を通る。
+  `chrome-extension://` / `moz-extension://`、またはOriginなしを許可する。
+  一般web origin・`Origin: null` は拒否する。extension IDの固定allowlistや本人確認コードではない。
+- protocol不一致は426、認証拒否は401、過大bodyは413、rate limitは429。
+  通常body上限2 MiB、rate limitは共有窓で60秒あたり900リクエスト。route固有の小さい上限もある。
+- Disconnectは永続的な失効状態を持ち、自動再pairで解除しない。
+  `/wake` は接続後5秒以内の最初のテキストframeをtokenとして認証する。URLにtokenは入れない。
+- このpairingは**同一ユーザーのローカルプログラムもtokenを取得できる設計**である。
+  ローカルツールの実行同意を意味しない。ファイル・shellを追加するなら、別途app側の明示的なrun許可が必要。
+
+根拠: `bridge.ts:1748–1764, 1895–1901, 3218–3357`、
+`background.js:454–455, 1139–1153, 1234–1286, 1341–1376`、`browser-wake.ts:109–169`。
+
+### 2.3. 拡張から来るメッセージと応答
+
+HTTPの成功bodyはrouteごとに異なり、一律の `{ok,result}` ではない。
+`background.js::call` が受け手側で `{ok: response.ok, status, data}` に包む。
+HTTPエラーは通常 `{error: '<code>', ...}`。下表は `bridge.ts::handle` のroute群。
+
+content→backgroundの既存runtime messageは `background.js:4577` の `HANDLERS` が受ける。
+例えば `events` → journal → `/events`、`correlate` → `/correlations`、
+`desktop_input` → `/input/*`、`redeem/command_step/ack` → `/commands/*`。
+`desktop_input` はapp composerの入力配送であり、native mouse/key実行ではない。
+Veniceの `cos-venice-bridge` はこの表とは別の専用分岐である。
+
+| 種類 / route | 拡張から送るもの → アプリが返すもの |
+| --- | --- |
+| `GET /hello`, `POST /pair` | 識別・protocol / reuse・reconnect → 上記識別情報 / `{token}`。 |
+| `/status`（通常POST、GETも受理） | open/stalled conversation一覧、ブラウザ状態 → `{ok, conversations, inputs, stopTurns, commandIds, revivals, repairs, ...}`。command件数と一覧は実行許可そのものではない。 |
+| `POST /events` | `{conversationId, events, agent?, agentCommandId?, ...}`。turn開始/終了、user/assistant本文、page tool、tool evidence、model選択、native画像、trace等 → 通常 `{sessionId, stored}`。補助観測のみなら `{ok:true, stored:0}`。 |
+| `POST /correlations` | `{conversationId, calls, ...}` の正確なrequest証拠 → `{ok, conversationId, sessionId, requestIds, confirmed, conflicts, complete}`。ChatGPTのrequest-idと会話のjoinで、Veniceにはそのまま使えない。 |
+| `/input/*`（POST） | `claim/bind/ack/fail/answer/progress/attachment/opening-unavailable`。入力UUID・ownerと必要な会話/文書情報、結果・添付chunk要求 → claimされた入力/添付データまたはroute固有の受付結果。outboxが権限と遷移を検証する。 |
+| `/commands/*`（POST） | `redeem/step/ack/revivals/pending`。command ID、owner、document等のlease、実行step・receipt → 対応command/stepの許可や受付結果。command種別はworker/resume/revive/stop。 |
+| `POST /browser-control` | `poll` / `claim` / `check` / `result` とbrowser ID、command ID、epoch等 → pending情報とpolicy / `{command}` / `{allowed}` / `{ok}`。これは**app→拡張のブラウザ操作RPC**を拡張が受領・報告する経路であり、逆向きのOSツールRPCではない。 |
+| `/activity`, `POST /activity/detail` | conversation宛ての状態取得、明示的な1呼び出し詳細要求 → appが持つ作業状態・tool詳細。 |
+| `POST /repairs/claim`, `/reveal/failed`, `/closed`, `/conversation-deleted`, `/page-note` | 正確な対象・repair token・失敗/閉鎖/ページ注記 → claim可否や受付結果。閉鎖観測と会話削除は別。 |
+| `POST /models`, `/chatgpt-projects`, `/project-create`, `/plugin-refresh`, `/browser/preferences`, `/browser/web-chat-title` | アカウントcatalog、project作成、connector更新、設定、titleの観測・receipt → route固有の受付/次の状態。 |
+| `POST /usage`, `/core-plugin`, `/image-export`, `/diagnostics`, `/extension/update` | 使用状況、connector存在、画像export、診断、更新準備 → 受付結果、または更新の `{ready, hold?, ...}`。 |
+| `/compact`, `/goal/draft`, `/goal/ack`, `/goal/objective`, `/goal/open`（POST）、`/settings`（GET/POST） | compaction、Goal/Loop、限定設定の操作 → 各所有者の状態/受付結果。任意config変更APIではない。 |
+| `POST /browser/presence`, `/cos-browser/sign-in`（GET/POST） | 外部browserの存在/ログイン観測、明示的なCoS browserログイン移送 → `{ok}`、transfer offer/受付。Veniceの認証を移送する経路ではない。 |
+
+## 3. ファイル・shell・grepを実行する関数
+
+### 3.1. 呼び出しの共通入口
+
+```text
+mcp/server.ts::startMcpServer → tools.ts::buildServer(ctx, surface, ...)
+  → kernel.ts::createRegistrar(server, ctx, surface, ...)
+  → tools-core.ts::registerCoreTools(reg) の匿名handler
+  → kernel.ts::dispatch(...) → 実行時検証 → 下表の実装
+```
+
+`tools-core.ts` に汎用export `executeTool(name,args)` はない。
+`SurfaceRegistrar.invokeNested(name: string, args: unknown, parent: CallContext): Promise<ToolResult>`
+（`kernel.ts:1566,1596`）はcode-modeの既存child呼び出し用。
+`tools.ts::buildServer` がlive configでregistrarを再構築してこれを使う。
+新しい外部RPCへそのまま公開すると、親の呼び出し元証明やtop-levelの記録・結果配信条件が欠ける。
+
+### 3.2. モデル向けhandlerと実行実体
+
+`ToolResult = {content: (text | image)[], structuredContent?: Record<string,unknown>, isError?: boolean}`
+（`kernel.ts:262–266`）。引数の細部は各 `toolDeclaration` / Zod schemaが正。
+下表の型名は元ファイルの型を参照する。省略記号で新しい呼び出し規約を作らない。
+
+| 操作 | 関数名・シグネチャ | 直接の呼び出し元 / 実体 |
+| --- | --- | --- |
+| 登録 | `registerCoreTools(reg: SurfaceRegistrar): void` (`tools-core.ts:265`) | `tools.ts::buildServer` とcode-mode child用registrar構築。 |
+| 読む | 登録名 `read`、匿名 `async ({paths, start_line, end_line, max_bytes}) => Promise<ToolResult>` (`tools-core.ts:327`) | registrar → `readOne`。pathsの展開、capability、総量制限、部分失敗の扱いを所有。 |
+| 1対象を読む | `readOne(requested: string, options: ReadOneOptions): Promise<{text:string; bytes:number; image?:{data:string; mimeType:string}}>` (`tools-core.ts:2413`) | `read` handler → `resolveIn` → `read-backend.ts::statInfo/listDirectoryLevel/readTextFile` または画像経路。private関数。 |
+| テキスト読取 | `readTextFile(realPath: string, opts: {startLine?:number; endLine?:number; maxBytes?:number; fs?:ProjectFs} = {}): Promise<ReadTextResult>` (`codex/read-backend.ts:236`) | `readOne`、`project-files.ts:496,542`。`ProjectFs.readFileStream`で範囲付き・上限付き読取。 |
+| 書く/作る | 登録名 `apply_patch`、匿名 `async ({patch}) => Promise<ToolResult>` (`tools-core.ts:729`) | registrar → `runParsedPatch`。create/edit/move/deleteを別々に判定。 |
+| patch検証と記録 | `runParsedPatch(args: {patch:string; hunks:Hunk[]; workdir:string\|null; environmentId:string\|null}, roots: readonly Root[], base: {real:string; virtual:string}, caps?:Capabilities): Promise<ParsedPatchRun>` (`tools-core.ts:1903`) | `apply_patch` handler、`exec_command`の明示apply_patch intercept。path解決・検証・checkpoint・失敗時rollback・変更記録 → `executeApplyPatch`。 |
+| patch実行 | `executeApplyPatch(options: {patch:string; cwd:string; updateFileMode?:ApplyPatchFileUpdateMode; resolvePath?:PatchPathResolver; fs?:ProjectFs}): Promise<ApplyPatchExecution>` (`codex/apply-patch/index.ts:479`) | `runParsedPatch` → `applyPatchWithMode(patch, updateFileMode, cwd, stdout, stderr, resolvePath, fs)` (`:185`) → `ProjectFs.writeFile/remove/createDirectory`。 |
+| shell | 登録名 `exec_command`、匿名 `async (input) => Promise<ToolResult>` (`tools-core.ts:807`付近) | `cmd`または`cmds`の片方、`workdir`, `tty`, `yield_time_ms`, `max_output_tokens`, `shell`, `login`。cwd、command policy、shell/rg正規化、プロセス所有者 → manager。 |
+| プロセス開始 | `UnifiedExecProcessManager.execCommand(request: ExecCommandRequest): Promise<ExecCommandToolOutput>` (`codex/unified-exec.ts:816`) | `tools-core.ts:997` の `unifiedExecManager.execCommand` → `UnifiedExecProcess.spawn(params: SpawnParams): Promise<UnifiedExecProcess>` (`:335`) → PTYまたはchild process。singletonは `codex/manager.ts`。 |
+| stdin/続きの取得 | 登録名 `write_stdin`、匿名 `async (input) => Promise<ToolResult>` → `UnifiedExecProcessManager.writeStdin(request: WriteStdinRequest): Promise<ExecCommandToolOutput>` (`tools-core.ts:1168`, `unified-exec.ts:934`) | `session_id`, `chars`, `yield_time_ms`, `max_output_tokens`。handlerで所有者/現在workspaceを検証してから送る。数字のprocess IDだけでは権限にならない。 |
+| 検索 | 登録名 `find`、匿名 `async ({query,path,mode,include,exclude,case_sensitive,regex,max_results}) => Promise<ToolResult>` (`tools-core.ts:607`付近) | commandが無効でsearchが有効な場合に公開。`mode:'content'`がgrep相当。folder → `search`、file → `searchOneFile`。 |
+| folder検索 | `search(req: SearchRequest): Promise<SearchOutcome>` (`search.ts:357`) | `find` handler (`tools-core.ts:691`)。ローカルcontent検索はbundled ripgrep優先、利用可能な条件でbounded JS walkへ。regexにはrgが必要。 |
+| file検索 | `searchOneFile(realPath:string, virtualPath:string, req: Pick<SearchRequest,'query'\|'mode'\|'include'\|'caseSensitive'\|'regex'\|'maxResults'\|'deadline'\|'server'>): Promise<SearchOutcome>` (`search.ts:491`) | `find` handler (`tools-core.ts:625`)。サイズ上限とinclude判定後に検索。 |
+| ローカルFS最下層 | `readFile(path:string, maxBytes:number = MAX_READ_FILE_BYTES): Promise<Buffer>`、`readFileStream(path:string): AsyncGenerator<Buffer,void,undefined>`、`writeFile(path:string, contents:Buffer\|string): Promise<void>` (`codex/filesystem.ts:179,215,252`) | `remote/project-fs.ts::localFs` → read-backend / patch runtime。権限検証済みの上位から使うprimitiveで、外部RPCへ直接公開しない。 |
+
+補足:
+
+- commandが有効な通常構成では独立した `grep` toolはなく、`exec_command`でbundled `rg`を使う。
+  `ripgrep.ts::locateRipgrep` と `tools-core.ts` のnormalizer/binderを再利用する。
+- `fsops.ts` の `replaceTextFile(realPath, content)` / `appendTextFile(realPath, content)` /
+  `editTextFile(realPath, edits)` / `editTextFiles(files)` は存在するが、現行Coreの書込handlerはそれらを呼んでいない。
+  `exec.ts` の `runPowerShell(script,cwd,timeoutMs)` / `runCommand(command,args,cwd,timeoutMs,env?)` も
+  現行 `exec_command` の起動経路ではない。古いhelper名を新しいgatewayの入口にしない。
+- `exec_command` の `max_output_tokens` はschema上受理するが、このhandlerは固定上限を使う。
+  RPCで実効値の意味を変更しない。textとstructuredContent、実exit code、benign exit、process/session情報を保つ。
+- file sandboxはファイルツールの制限。**shellはログインユーザー権限の任意コードで、承認root内にOS隔離されない。**
+  shell権限を単なる「承認フォルダ内の操作」と説明して許可を取ってはいけない。
+
+## 4. native Desktopの入口
+
+macOSの公開toolは `mcp/tools-desktop.ts::registerDesktopTools(reg)` →
+`guardDesktopTools(reg)` → `tools-desktop-macos.ts::registerMacOSDesktopTools(reg)`。
+`observe`（`:185`付近）と `computer`（`:388`付近）が入口で、screen/control/clipboardを個別に検証する。
+`mcp/desktop-caller.ts::desktopCallerRefusal` は既定で既知のsession/conversationを要求する。
+Veniceのために `desktopUnattributed` を有効にして回避しない。
+
+```text
+observe / computer
+  → computer/index.ts::screenshot / getWindowState / act / actAndCapture
+  → exclusiveな取得/操作 → runHelper → sendHelperRequest
+  → packaged macOS: sendMacOSAddonRequest → Electron Worker
+  → addon.initialize(library) / addon.handle(JSON.stringify(request))
+  → native/macos-desktop-addon/addon.cc::Initialize / Handle
+  → Swift dylib: cos_desktop_handle_json → response(for:) → handle(_:)
+```
+
+`MACOS_ADDON_WORKER_SOURCE` は `computer/index.ts:592` に埋め込まれている。
+別のworkerファイルではない。開発用などの別経路は、同じSwift実装をstandalone helperとして使い、
+stdin/stdoutの1行JSONで通信する。native helperに8765付近のTCP listenerはない。
+
+| 目的 | JS入口 | nativeの入口・実行関数 |
+| --- | --- | --- |
+| screenshot | `screenshot(opts:{window?:number;full?:boolean;maxWidth?:number;crop?:Rect}): Promise<Screenshot>` (`computer/index.ts:1221`)。`observe`やcapture付き操作から呼ぶ。 | Swift `handle(_ request:JSONObject) throws -> JSONObject` (`main.swift:1587`) の `op:'capture'` / `'snapshot'` → `capture(_ request:JSONObject, forcedWindow:CGWindowID? = nil) throws -> JSONObject` (`:1493`)。ScreenCaptureKit。 |
+| click | `act(actions:Action[], opts:{frameId?:number;window?:number;ownerWindow?:number;app?:string;ownerApp?:string} = {}): Promise<ActionResult>` (`computer/index.ts:1428`)。結果capture/verify付きなら `actAndCapture` (`:1444`)。 | `op:'act'`, action `'click'/'double_click'` → `click(_ point:CGPoint, button:CGMouseButton, count:Int, targetWindow:CGWindowID? = nil) throws` (`main.swift:815`)。ref操作は `actUI` / AX経路。 |
+| key/text | 同じ `act` / `actAndCapture` に `{type:'keypress',keys:string[]}` / `{type:'type',text:string}`。 | `op:'act'` → `pressKeys(_ names:[String], targetWindow:CGWindowID? = nil) throws` (`:1022`) / `typeText(_ text:String, targetWindow:CGWindowID? = nil) throws` (`:1081`)。CGEvent、対象focusを再検証。 |
+
+C ABIは `main.swift:1779–1795` の `cos_desktop_handle_json` / `cos_desktop_free_json`。
+N-API exportは `addon.cc:85–91` の `initialize` / `handle`。
+nativeの成功は `{ok:true,...}`、失敗は `{ok:false,error_code,message,...}`。
+部分実行したbatchはcompleted/failed index等の証拠を上位で保持する。
+frame ID・AX ref・window geometry・helper generationの検証と、パッケージアプリ自身の
+Screen Recording / Accessibility権限を保つ。新しいnativeコードは不要という設計見込みである。
+
+## 5. A/B共通で必要な接続契約
+
+以下は**ローカルツールを使うrunの提案**。現行route・型・実装と混同しない。
+Aの既存browser-only利用には、新しいapp同意・接続条件を適用しない。
+
+1. **runの許可はappが所有する。** 既存Electron UIで、local session / project、Veniceの脳タブ、許可tool、
+   データをVeniceへ渡す範囲をユーザーが確認する。MAINから来た `postMessage` は同じwebページも作れるため、
+   origin検査とpairingだけでOS権限を与えない。bridge tokenとrunの秘密はMAIN・モデル本文へ渡さない。
+   backgroundがChrome由来のtab/document IDを付け、appは許可時のbinding/epochと照合する。
+2. **専用gatewayから既存handlerへ入る。** 例えば `/venice/tools` と専用wire型を追加する。
+   clientはrun ID / call ID / surface / tool / argsを送り、app内の許可記録からcaller・session・cwdを決める。
+   clientの自己申告session IDやモデル出力から `CallContext` を作らない。
+3. **kernelの共有検証を正規に再利用する。** `createRegistrar` にhost-admitted top-level呼び出し口を設ける案とし、
+   `call-context` / recorderのoriginにapp許可済みVenice runを区別して導入する。
+   `invokeNested`へ偽のparentを渡すだけの接続はしない。schema、live capability、read-only、Block/Trust、workspace、
+   shell policy、秘密のshield、記録・publicationを通す。ChatGPTの既存request証明方式はそのまま維持する。
+4. **provider IDを偽造しない。** 現行 `bridge.ts:2401` のconversation parserはChatGPT向け。
+   Veniceのchat ID形式は本調査で未確認。app発行のlocal session/runとprovider名、観測したopaqueなchat keyを分ける。
+   `shared/session.ts` / store / recorderで既存ChatGPT sessionの既定値・復元契約を保ち、Veniceを記録する。
+   Venice側の一意bindingが証明できないときは、runを開始しない。
+5. **副作用を重複させない。** gatewayはcall IDを一度だけ受理し、同じ内容の再取得には同じ記録結果を返す。
+   実行受付を副作用前に永続化し、完了結果は既存のcanonical tool記録を参照する。app再起動後に受付だけ残ったcallは
+   成否不明として停止し、command/clickを自動再実行しない。別sessionからの結果・stdin取得は拒否する。
+6. **返す形式と停止条件を保つ。** appはcall ID / state（pending/completed/unknown）と元の `ToolResult` を返す。
+   HTTP受付成功と `isError:false` を区別する。長いshellは既存 `exec_command` のyield/sessionと `write_stdin` を使う。
+   HTTPが先に期限に達したら同じcallを照会し、新規実行しない。現行MAIN bridgeの45秒deadlineを無限待ちにしない。
+   Stop・脳タブ再読込/別chat遷移・disconnect・app終了はrunを失効させ、次のtool/turnを開始しない。
+   実行済み副作用は戻さず、動作中プロセスは既存session所有権で状態を示す。Stopを無条件killと再定義しない。
+7. **画像をtextへ偽装しない。** 現行 `sendViaUi(text)` と `buildTurn` はtext専用であり、MCP image blockは渡せない。
+   画像はapp/ISOLATEDでサイズを制限し、明示許可後にVenice UIの添付として送るmedia adapterを別途設計する。
+   image blockはapp/ISOLATEDで扱い、MAINへはtext/structured情報と添付受付の参照を返す。
+   base64をpromptのJSONへ埋め込まない。添付selector・UI受付の証拠・利用モデルのvision対応は未確認。
+   AXのtext観測とローカルの画像previewまでは分けて検証できるが、それを画像を見たモデルのdesktop操作完了とは扱わない。
+
+Core/desktopでsurface境界を維持し、最初のallowlistは `read`, `apply_patch`, `exec_command`, `write_stdin`,
+構成に応じた `find`、macOSの `observe` / `computer` に限定する。任意IPC、Plugins、agents、Goal/Loopを一括公開しない。
+新namespaceの対応確認を行い、未対応appなら明示的に停止する。現行ChatGPT protocol 15の意味を変更しない。
+
+## 6. A案とB案の比較
+
+### 6.1. 同じ完成範囲で比べる
+
+範囲は、既存ブラウザ操作の維持、appでのrun許可と記録、file読書き、shellと継続stdin、grep相当、
+macOS screenshot/click/key、モデルへ画像を渡すUI transport、失効・重複防止まで。
+依存追加、新アプリ、ChatGPTのGoal/worker/compactionをVeniceで全面再現する作業は含めない。
+
+| 比較 | A: ループは拡張、local toolをRPC | B: ループはsrc、拡張はadapter |
+| --- | --- | --- |
+| 状態の所有者 | `venice-agent.js::runTask` がstep/stopを所有。appはrun許可・local toolとその結果のみを所有。 | 新しい `src/main/venice-runner.ts` がstep/stopを所有。拡張はsend/応答観測/ブラウザ操作を依頼どおり行う。 |
+| 経路 | 既存MAIN → ISOLATED → background → 新gateway → registrar/kernel → 既存tool。browser toolは現状維持。 | app runner → provider adapter → bridgeのoffer/claim/result → background → Venice UI。model actionをappが解析してlocal toolを呼び、browser toolだけ拡張へ返す。 |
+| コード変更ファイル数の基準見積り | **19ファイル**（新規含む）。下記共通候補のみ。 | **25ファイル**（共通19 + 追加6）。 |
+| テスト・文書を含む基準見積り | test 5 + docs 2を加え **26ファイル**。 | test 7 + docs 2を加え **34ファイル**。 |
+| 実行実体の再利用率 | 下記10実行moduleの **10/10 = 100%を改変せず利用する設計**。 | 同じ **10/10 = 100%**。loopを移すだけでは既存toolの再利用率は上がらない。 |
+| Veniceの既存3機能単位の維持率 | loop、UI sender/SSE、作業タブDOM実行の **3/3**。RPC分岐は追加する。 | sender/SSE、DOM実行の **2/3**。loopは移設し、panelをapp状態の表示に変える。 |
+| 壊れやすさ | 比較的小さい。ただしMAIN再読込でloop状態は失われ、appの許可・結果との照合が必要。切断後は停止し、勝手に復元しない。 | 比較的大きい。UI transportのclaim/receipt、outbox、stop、session開始・promptとloop所有者を同時に変更する。appにloopがあっても曖昧な送信を自動再送できるわけではない。 |
+| 使い方 | 現行パネルを残し、local toolを使うrunだけapp側の許可を追加する。browser-only taskは従来どおりappなしでも動く。 | appを起点にし、パネルは進捗/停止adapterにする。基本構成はbrowser-onlyでもappが必要になる契約変更を伴い、B採用時の明示承認が必要。app不要の利用も維持する場合は、旧loop互換モードの追加設計と所有者の排他が必要。 |
+| 実装順 | 共通契約 → textのreadだけ縦接続 → patch → shell/stdin/rg → DesktopのAX/画像添付 → 回帰検証。 | 共通契約 → 合成providerでrunner → browser send/receipt adapter → outbox/session/panelの接続 → local tool → Desktop/media → 既存loopの撤去と回帰検証。 |
+
+**数え方と確度:** 実装前の候補ファイルに基づく基準値で、実測diffやLOC再利用率ではない。
+添付UI・provider sessionの詳細と型依存で増減する。テストは5/7の直接対象ファイルを見込み、
+追加の既存回帰test修正は別に増え得る。画像添付を後回しにして最初のtext縦接続を作っても、上の完成範囲は変えない。
+Bの数にはapp不要の旧loop互換モードを含めていない。現行のapp不要という利用条件を保つ場合は追加見積りが必要。
+
+共通19ファイルの候補:
+
+1. `extension/venice-agent.js`, `venice-bridge.js`, `background.js`, `venice-panel.js`（4）: local RPC・sender証明・stop/失効。
+2. `extension/venice-media.js`（新規）、`extension/manifest.json`（2）: 画像添付adapterの登録。具体的なUI実装は要確認。
+3. `src/main/bridge.ts`, `src/main/venice-tool-gateway.ts`（新規）、`src/shared/venice-integration.ts`（新規）（3）: route・run許可/receipt・wire schema。
+4. `src/main/mcp/kernel.ts`, `src/main/mcp/call-context.ts`, `src/main/session/recorder.ts`, `src/main/session/store.ts`, `src/shared/session.ts`（5）: 正規callerと記録のprovider境界。
+5. `src/main/ipc.ts`, `src/preload/index.ts`, `src/renderer/chat.ts`, `src/renderer/index.html`, `src/main/index.ts`（5）: 固定IPCのrun許可操作・UI・終了時の失効配線。
+
+Bの追加6ファイル候補:
+
+- `src/main/venice-runner.ts`、`src/main/venice-provider.ts`（新規2）: loopとbrowser往復の所有者。
+- `src/main/session/input.ts`, `start-input.ts`, `prompt.ts`、`src/shared/input.ts`（4）: providerに応じた入力配送とprompt。
+  `goal.ts` のChatGPT固有automationをそのままVenice loopへ転用しない。
+
+共通の10実行module: `codex/read-backend.ts`, `codex/filesystem.ts`, `codex/apply-patch/`, `search.ts`,
+`ripgrep.ts`, `codex/unified-exec.ts`, `codex/manager.ts`, `computer/index.ts`,
+`native/macos-desktop-helper/main.swift`, `native/macos-desktop-addon/addon.cc`（先頭8つは `src/main/` 基準）。
+permission/identity/recording層はこの「無改変再利用」の分母に含めていない。
+
+直接対象testの見積りは、既存 `test/venice-agent.test.cjs`, `test/venice-bridge.test.cjs` と、
+新規gateway/session/mediaの3ファイル。Bはrunner/providerの2ファイルを追加する。
+docs 2は本書と `docs/venice-findings.md`。
+
+## 7. 推奨A案の最初の3ステップ
+
+1. **境界と変更許可を確定する。** 本書の `src/` 変更候補、appでのrun同意、provider/session証明、
+   tool allowlist、text/imageの送信範囲を承認対象にする。新wire型と失効・重複時の応答を合成testで固める。
+   Venice認証ヘッダやprivate endpointを調べ直す必要はない。
+2. **textのreadを1本つなぐ。** appで許可したsessionから、既存panel/loop → ISOLATED/background → gateway →
+   live registrar/kernel → `read` → 元の `ToolResult` → 次の合成model turn、まで通す。
+   未pair、許可なし、別tab/document/session、期限切れ、root外、read無効、再読込後の呼び出しを拒否する。
+   browser-only taskがappなしでも継続して使えることも検証する。
+3. **同じ入口でpatchとshell/stdin/rgへ広げる。** 一時的なテスト用workspaceで、書込後read、遅いcommandのyield/poll、
+   別sessionのstdin拒否、途中の権限取消、受付後の通信断・同じcall ID再取得を検証する。
+   その後、同じcaller経路でDesktopのAX観測・frame/ref付きclick/key・画像添付を実装し、実アプリで受け入れる。
+   画像をモデルが実際に見られるまではDesktop全体を完了扱いにしない。
+
+Bへ移る判断点は「脳タブ再読込をまたぐtask継続」や「appのoutboxをVenice操作の唯一の起点にする」が
+実際に必要になった時。Aのgatewayとcaller契約はそのまま使い、loop所有者だけを後から移せる形にする。
+
+## 8. 検証済みの範囲と残る確認
+
+- 今回の証拠はソース読取。ポート値は設定/実装値で、稼働中listenerを実測したものではない。
+- `pwd` と直近logは依頼どおり確認した。`ffa8acac`、`6d99720a`、`9ccfaecd`。
+- 文書の参照先、主要関数の行番号、見積り集計、diffを確認した。実装test・build・native操作・実送信は未実施。
+- 次回の実装はまず `src/` 編集禁止の変更承認が必要。画像添付DOM、vision対応、Venice chatの一意bindingは未確認。
+- private endpointの403原因、attestation/認証の要否、規約解釈、provider側の履歴保持、既知のContent-Type問題は
+  未解明のまま引き継ぐ。ADRのprivate endpoint再送停止を維持し、今回の調査で送信再開は承認しない。
