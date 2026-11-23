@@ -1,29 +1,13 @@
 // Synthetic DOM and model replies only. No Venice traffic or private fixtures.
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const {JSDOM} = require('jsdom');
-const source = fs.readFileSync(path.resolve(__dirname, '../extension/venice-agent.js'), 'utf8');
+const {agentHarness} = require('./venice-bridge-harness.cjs');
 const plain = value => JSON.parse(JSON.stringify(value));
 const tool = (name, args = {}) => ({action: 'tool', name, args});
 const done = summary => ({action: 'done', summary});
 
 function harness(t, replies = [], html = '') {
-  const dom = new JSDOM(html, {url: 'https://venice.ai/chat/synthetic', runScripts: 'outside-only'});
-  t.after(() => dom.window.close());
-  const w = dom.window, prompts = [];
-  w.fetch = () => assert.fail('Network must not be used');
-  Object.defineProperty(w, 'chrome', {get() { assert.fail('Chrome APIs must not be used'); }});
-  w.__cosVeniceSend = {async sendViaUi(prompt) {
-    prompts.push(prompt);
-    assert.ok(replies.length, 'Unexpected model turn');
-    const reply = replies.shift();
-    if (reply instanceof Error) throw reply;
-    return typeof reply === 'string' ? reply : JSON.stringify(reply);
-  }};
-  w.eval(source);
-  return {w, api: w.__cosVeniceAgent, prompts};
+  return agentHarness(t, {replies, html, owned: true});
 }
 
 test('loading is inert; runTask ends on the first done and preserves runTurn', async t => {

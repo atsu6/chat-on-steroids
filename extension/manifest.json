@@ -49,6 +49,12 @@
       "run_at": "document_start"
     },
     {
+      "matches": ["https://venice.ai/*"],
+      "js": ["venice-bridge.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start"
+    },
+    {
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"

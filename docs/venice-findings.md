@@ -691,3 +691,44 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 実UIでの検証に進む場合は利用許可と送信範囲を先に確認する。
   今回は合成検証とローカルcommitまでとし、pushしない。
+
+## 2026-11-23 — 作業タブとMAIN/ISOLATEDブリッジ（実送信なし）
+
+### 分かったこと
+
+- `venice-bridge.js` をVenice限定の ISOLATED / document_start に追加した。
+  MAINからの `{__cosVeniceBridge: {id, op, args}}` を、同じwindowとVenice originであることを
+  確認して固定type `cos-venice-bridge` でbackgroundへ転送し、対応するidで応答を返す。
+- `background.js` はVenice用関数表とメッセージ分岐の追加のみ。既存ChatGPT処理は変更しない。
+  `ensureTab` / `eval` / `activate` / `close` に対応し、作業タブのIDは脳タブごとの
+  session storageキーに保存する。既存のserializeTabで要求を直列化する。
+- `tab_open({url})` は作業タブを非アクティブで新規作成するか、既存タブを指定URLへ遷移させ、
+  最大30秒で読み込み完了を待ってURLを返す。保存IDを使ったworker再起動後の再利用も合成検証した。
+  Venice脳タブそのものを遷移・DOM操作の対象にはしない。
+- DOM 4ツールはbackground内の固定関数表から、作業タブのトップフレーム・ISOLATEDへ
+  executeScriptする。任意コードを受け取らず、成功値とDOM例外を注入先で明示的に返す。
+  件数・文字数の制限とクリック判定は維持した。
+- 作業タブがないと `ok: false` と「先に tab_open(url) を実行してください」を返す。
+  自動で脳タブにフォールバックしない。手動閉鎖は次の要求で保存IDを掃除し、ensureTabだけが再作成する。
+  Chrome APIの権限拒否はタブ不在と区別し、再試行・迂回をしない。
+- 実装3ファイルと合成テスト/ヘルパー3ファイルの `node --check` が成功した。
+  `node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-ui-send.test.cjs` は41件成功。
+  MAINにChrome APIがない構成で、往復・送信元検査・誤id無視・タイムアウト・作成/再利用/閉鎖・
+  worker復帰・連続要求・runTaskからの呼び出しを確認した。DOMは別の合成documentで実行する。
+- 既存回帰テスト `test/extension.test.ts` と `test/cos-browser-extension-worker.test.ts` は
+  初回400件成功、manifestの旧期待値1件が失敗した。前タスクで追加済みのvenice-agent登録を
+  そのVenice期待値に反映し、該当1件の再実行が成功した。ChatGPT側の期待値は変更していない。
+- 今回は実ブラウザ操作も実送信も0回。新しいcapture/record番号はない。
+  上記の根拠はローカル合成テストであり、通信recordの追加取得ではない。
+
+### 不明なこと
+
+- 実Chromeでのworld間往復と作業タブ操作は未確認。合成テストはChrome APIを模し、
+  注入関数を文字列化して別documentで再構築する。innerTextとスクロールは合成値・スタブを使う。
+- private endpoint直叩きの403原因、§12(d)の解釈、attestationと認証ヘッダの要否、
+  サーバ側の履歴保持、Content-Typeは未解明のまま引き継ぐ。今回の調査・再送対象ではない。
+
+### 次に確認したいこと
+
+- 実ブラウザでの確認時は拡張を再読み込みし、非機密の作業ページでブリッジの往復を確認する。
+  今回は合成テストとローカルcommitまでとし、送信・pushは行わない。
