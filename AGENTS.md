@@ -7109,7 +7109,8 @@ detail. A new durable fact must have one named owner, lifetime and publication b
 
 Web UI の通信記録・伏字保存と、fixture に基づく `sendTurn(messages, model)` の単発送信まで。
 sender は元の Response をそのまま返し、認証情報の生成・推測、401後のヘッダ追加や自動再試行は行わない。
-応答パーサ、ツール実行、自動ループ、アプリ本体の変更は今回の範囲に含めない。
+取得済みfixtureだけを入力にするオフラインSSEパーサも含む。
+ツール実行、自動ループ、アプリ本体の変更は今回の範囲に含めない。
 2026-11-23 の実送信は HTTP 403 と規約違反・利用停止の警告を受けたため停止中。
 ADR の再検討条件が成立している。追加の private endpoint 送信や認証ヘッダ推測は行わず、
 API 移行など次の方針はユーザーの判断を待つ。

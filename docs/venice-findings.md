@@ -556,3 +556,37 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - ADRの再検討条件が成立した状態を維持する。提供元の許可確認、または公式APIを使う方針の判断が必要。
   今回は読み取り結果の文書化とコミットで停止し、pushはしない。
+
+## 2026-11-23 — タスクA: 送信なしのオフラインSSEパーサ
+
+### 分かったこと
+
+- `extension/venice-sse.js` に `__cosVeniceSse.parse(rawText)` を実装した。
+  入力は取得済みの文字列だけで、fetch・ブラウザ状態・認証値へアクセスしない。
+  戻り値は `{ text, reasoning, ok, termination, malformedJsonEvents }`。
+- 空行で閉じたイベントから `event:` / `data:` を読み、複数data行は改行でまとめる。
+  壊れたJSONイベントは数えて破棄し、次へ進む。CRLF、LF、コメント、先頭BOMに対応した。
+- `response.output_text.delta`（または `output_text.delta`）の数値 index 1だけを text、0だけを reasoningへ連結する。
+  その他のindex、文字列のindex、非文字列delta、`*.done` の全文は本文へ混ぜない。
+- `response.completed` は正常終了。先行する `[DONE]` は `done_without_completed`、
+  完了なしのEOFは `eof`、error / failed / incomplete / cancelled はそのイベント名で異常終了する。
+  終端後のデータと、空行で閉じていない最後のフレームは採用しない。
+- 元の `fixtures/venice-capture-2026-11-23T13-15-07-891Z.json` の **#2** を実際に読み、
+  `text: "青い伞"`、`reasoning.length: 315`、`ok: true`、`termination: "response.completed"`、
+  `malformedJsonEvents: 0` になることをテストで確認した。reasoningは本文へ混ざっていない。
+- `node --check extension/venice-sse.js` と
+  `node --test docs/venice-sse.test.cjs docs/venice-sse-fixture.test.cjs` が成功した。
+  合成15件と実fixture1件の計16件。合成テストはprivate fixtureなしで実行でき、
+  実fixtureテストだけが既存のローカルcaptureを必要とする。capture自体はGit除外のまま。
+
+### 不明なこと・今回の範囲
+
+- このAPIは保存済みSSE全文の解析用。ライブ受信やUI送信との結合は検証・実装していない。
+- タスクBの `follow()` / `sendViaUi()` と、そのConsole送信は実施していない。
+  `venice-recon.js`、`venice-send.js`、manifestは変更していない。今回の追加送信は0回。
+  403の制限を実UI経由で通す自動送信へは進めない。
+
+### 次に確認したいこと
+
+- このパーサの追加検証は保存済みfixtureまたは合成データで行える。
+  ライブ送信の方針とは分け、今回のタスクAだけをコミットして停止する。pushはしない。
