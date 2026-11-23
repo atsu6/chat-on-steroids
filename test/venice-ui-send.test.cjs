@@ -24,6 +24,7 @@ function harness(t, response = () => sse('合成の回答')) {
   let now = 0, timerId = 0;
   w.Date = class extends Date { static now() { return now; } };
   w.setTimeout = (cb, ms) => { timers.set(++timerId, { cb, at: now + ms }); return timerId; };
+  w.requestAnimationFrame = cb => w.setTimeout(() => cb(now), 16);
   Object.assign(w, { Request, Response, Headers, TextEncoder, TextDecoder, structuredClone });
   w.fetch = (url, init) => {
     calls.push({ url, init });
@@ -36,7 +37,8 @@ function harness(t, response = () => sse('合成の回答')) {
   const textarea = w.document.querySelector('textarea');
   for (const type of ['input', 'keydown', 'keypress', 'keyup']) {
     w.document.addEventListener(type, e => events.push({
-      type: e.type, key: e.key, code: e.code, bubbles: e.bubbles, value: e.target.value
+      type: e.type, key: e.key, code: e.code, bubbles: e.bubbles, value: e.target.value,
+      composed: e.composed, isComposing: e.isComposing, at: now
     }));
   }
   let followed = 0;
@@ -90,9 +92,14 @@ test('native TEXTAREA setter and bubbling input/Enter events drive one synthetic
   const result = h.api.sendViaUi('こんにちは\n二行目').then(text => { resolved = true; return text; });
   assert.equal(h.recon.status().recording, true);
   assert.equal(h.textarea.value, 'こんにちは\n二行目');
+  assert.deepEqual(h.events.map(e => e.type), ['input']);
+  await h.advance(81);
+  assert.equal(h.calls.length, 0);
+  await h.advance(1);
   assert.deepEqual(h.events.map(e => e.type), ['input', 'keydown', 'keypress', 'keyup']);
   assert.ok(h.events.every(e => e.bubbles && e.value === h.textarea.value));
-  assert.ok(h.events.slice(1).every(e => e.key === 'Enter' && e.code === 'Enter'));
+  assert.ok(h.events.slice(1).every(e => e.key === 'Enter' && e.code === 'Enter' && e.composed && !e.isComposing));
+  assert.ok(h.events.slice(1).every(e => e.at === 82));
   await h.settle();
   await h.advance(499);
   assert.equal(resolved, false);
@@ -114,6 +121,7 @@ test('baseline excludes a previous chat; helper completion cannot finish an open
   h.submit();
   let resolved = false;
   const result = h.api.sendViaUi('new text').then(text => { resolved = true; return text; });
+  await h.advance(82);
   await h.w.fetch('/helper', { method: 'POST' });
   await tick();
   await h.advance(500);
@@ -143,17 +151,23 @@ for (const pending of [false, true]) {
       rejected = true;
       assert.match(error.message, /90秒.*baseline=1.*chatProgress=/);
       assert.equal(error.baseline, 1);
+      assert.equal(error.textareaLength, 'timeout test'.length);
+      assert.equal(error.buttonFound, false);
+      assert.equal(error.buttonDisabled, null);
+      assert.match(error.message, /textarea.value.length=12, buttonFound=false, buttonDisabled=null/);
       assert.deepEqual({ ...error.chatProgress }, {
         lastChatNumber: pending ? 2 : 1, lastChatBodyComplete: !pending, lastChatStatus: 200
       });
       return true;
     });
+    await h.advance(82);
     await h.advance(89_500);
     assert.equal(rejected, false);
     await h.advance(500);
     await checked;
-    assert.equal(h.now, 90_000);
-    assert.equal(h.calls.length, pending ? 2 : 1); // No retries and no sendTurn fallback.
+    assert.equal(h.now, 90_082);
+    assert.equal(h.events.filter(e => e.type === 'keydown').length, pending ? 1 : 2);
+    assert.equal(h.calls.length, pending ? 2 : 1); // No extra request once a new chat exists; no sendTurn fallback.
     assert.equal(h.followed, 0);
     assert.equal(h.timers.size, 0);
     controller.close();
@@ -167,10 +181,10 @@ test('unterminated SSE rejects instead of returning partial text; a later call c
   }) : sse('recovered'));
   h.submit();
   const rejected = assert.rejects(h.api.sendViaUi('first'), /termination=done_without_completed/);
-  await h.settle(); await h.advance(500); await rejected;
+  await h.advance(82); await h.settle(); await h.advance(500); await rejected;
   assert.equal(h.followed, 0);
   const result = h.api.sendViaUi('second');
-  await h.settle(); await h.advance(500);
+  await h.advance(82); await h.settle(); await h.advance(500);
   assert.equal(await result, 'recovered');
   assert.equal(h.calls.length, 2);
 });
@@ -186,7 +200,7 @@ test('invalid input, missing TEXTAREA and overlapping calls do not trigger addit
   h.submit();
   const first = h.api.sendViaUi('first');
   await assert.rejects(h.api.sendViaUi('overlap'), /既に実行中/);
-  await h.settle(); await h.advance(500);
+  await h.advance(82); await h.settle(); await h.advance(500);
   assert.equal(await first, '合成の回答');
   assert.equal(h.calls.length, 1);
   assert.equal(h.events.length, 4);
@@ -199,8 +213,153 @@ for (const status of [401, 403]) {
     }));
     h.submit();
     const checked = assert.rejects(h.api.sendViaUi('test'), new RegExp(`status=${status}, termination=eof`));
-    await h.settle(); await h.advance(500); await checked;
+    await h.advance(82); await h.settle(); await h.advance(500); await checked;
     assert.equal(h.calls.length, 1);
+    assert.equal(h.followed, 0);
+    assert.equal(h.timers.size, 0);
+  });
+}
+
+for (const attributes of [{'aria-label': 'メッセージを送信'}, {type: 'submit'}]) {
+  test(`enabled ${JSON.stringify(attributes)} button is preferred after two frames, 50ms and 100ms`, async t => {
+    const h = harness(t);
+    const button = h.w.document.createElement('button');
+    for (const [name, value] of Object.entries(attributes)) button.setAttribute(name, value);
+    h.w.document.body.appendChild(button);
+    button.disabled = true;
+    h.textarea.addEventListener('input', () => {
+      // Synthetic React state settles after input, not synchronously with the value setter.
+      h.w.setTimeout(() => { button.disabled = false; }, 70);
+    });
+    const clicks = [];
+    button.addEventListener('click', () => {
+      clicks.push(h.now);
+      void h.w.fetch(chat, {method: 'POST', body: h.textarea.value});
+    });
+    h.submit();
+    const text = '長い複数行の指示\n次の行も保つ\n'.repeat(400);
+    const result = h.api.sendViaUi(text);
+    await h.advance(82);
+    assert.equal(h.textarea.value, text);
+    assert.equal(h.calls.length, 0);
+    await h.advance(99);
+    assert.deepEqual(clicks, []);
+    await h.advance(1);
+    assert.deepEqual(clicks, [182]);
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.calls[0].init.body, text);
+    assert.deepEqual(h.events.map(e => e.type), ['input']); // No Enter when button works.
+    await h.settle(); await h.advance(500);
+    assert.equal(await result, '合成の回答');
+    await h.advance(2_000);
+    assert.deepEqual(clicks, [182]);
+    assert.equal(h.events.length, 1);
+    assert.equal(h.followed, 0);
+  });
+}
+
+test('disabled button falls back to composed non-composing Enter without the 100ms button delay', async t => {
+  const h = harness(t);
+  const button = h.w.document.createElement('button');
+  button.type = 'submit'; button.disabled = true;
+  button.click = () => assert.fail('Disabled button must not be clicked');
+  h.w.document.body.appendChild(button);
+  h.submit();
+  const result = h.api.sendViaUi('disabled button');
+  await h.advance(82);
+  assert.equal(h.calls.length, 1);
+  const keys = h.events.filter(e => e.type !== 'input');
+  assert.deepEqual(keys.map(e => e.type), ['keydown', 'keypress', 'keyup']);
+  assert.ok(keys.every(e => e.at === 82 && e.composed && e.isComposing === false));
+  await h.settle(); await h.advance(500);
+  assert.equal(await result, '合成の回答');
+});
+
+test('a button disabled during the 100ms delay also falls back to Enter', async t => {
+  const h = harness(t);
+  const button = h.w.document.createElement('button');
+  button.type = 'submit';
+  button.click = () => assert.fail('Button became disabled before click');
+  h.w.document.body.appendChild(button);
+  h.w.setTimeout(() => { button.disabled = true; }, 100);
+  h.submit();
+  const result = h.api.sendViaUi('button state changed');
+  await h.advance(182);
+  assert.equal(h.events.find(e => e.type === 'keydown').at, 182);
+  await h.settle(); await h.advance(500);
+  assert.equal(await result, '合成の回答');
+});
+
+test('empty textarea after render wait stops before any send and releases the sending gate', async t => {
+  const h = harness(t);
+  const clear = () => { h.w.setTimeout(() => { h.textarea.value = ''; }, 20); };
+  h.textarea.addEventListener('input', clear);
+  const stopped = assert.rejects(h.api.sendViaUi('cleared during render'), /待機後の TEXTAREA が空/);
+  await h.advance(82); await stopped;
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(h.events.map(e => e.type), ['input']);
+  assert.equal(h.followed, 0);
+  assert.equal(h.timers.size, 0);
+  h.textarea.removeEventListener('input', clear);
+  h.submit();
+  const recovery = h.api.sendViaUi('recovery');
+  await h.advance(82); await h.settle(); await h.advance(500);
+  assert.equal(await recovery, '合成の回答');
+});
+
+test('a silent button gets exactly one Enter nudge at 2 seconds, which can start the chat', async t => {
+  const h = harness(t);
+  const button = h.w.document.createElement('button');
+  button.type = 'submit';
+  h.w.document.body.appendChild(button);
+  let clicks = 0;
+  button.addEventListener('click', () => clicks++); // Initial click deliberately does not submit.
+  h.submit(); // The nudge's Enter does submit.
+  const result = h.api.sendViaUi('nudge recovery');
+  await h.advance(182);
+  assert.equal(clicks, 1);
+  await h.advance(1_999);
+  assert.equal(h.events.filter(e => e.type === 'keydown').length, 0);
+  await h.advance(1);
+  const keys = h.events.filter(e => e.type !== 'input');
+  assert.equal(keys.length, 3);
+  assert.ok(keys.every(e => e.at === 2_182 && e.composed && e.isComposing === false));
+  await h.settle(); await h.advance(500);
+  assert.equal(await result, '合成の回答');
+  await h.advance(5_000);
+  assert.equal(clicks, 1);
+  assert.equal(h.events.filter(e => e.type === 'keydown').length, 1);
+  assert.equal(h.calls.length, 1);
+});
+
+for (const disabled of [false, true]) {
+  test(`silent ${disabled ? 'disabled' : 'enabled'} button nudges only once and timeout includes current diagnostics`, async t => {
+    const h = harness(t);
+    const button = h.w.document.createElement('button');
+    button.type = 'submit'; button.disabled = disabled;
+    h.w.document.body.appendChild(button);
+    let clicks = 0;
+    button.addEventListener('click', () => clicks++);
+    const finalText = 'synthetic private text';
+    const checked = assert.rejects(h.api.sendViaUi('initial text'), error => {
+      assert.equal(error.textareaLength, finalText.length);
+      assert.equal(error.buttonFound, true);
+      assert.equal(error.buttonDisabled, !disabled);
+      assert.match(error.message, /textarea.value.length=22, buttonFound=true/);
+      assert.ok(error.message.includes(`buttonDisabled=${!disabled}`));
+      assert.ok(!error.message.includes(finalText));
+      return true;
+    });
+    const preparation = disabled ? 82 : 182;
+    await h.advance(preparation + 5_000);
+    button.disabled = !disabled;
+    h.textarea.value = finalText;
+    await h.advance(85_000); await checked;
+    assert.equal(clicks, disabled ? 0 : 1);
+    const keydowns = h.events.filter(e => e.type === 'keydown');
+    assert.equal(keydowns.length, disabled ? 2 : 1);
+    assert.equal(keydowns[keydowns.length - 1].at, preparation + 2_000);
+    assert.equal(h.calls.length, 0);
     assert.equal(h.followed, 0);
     assert.equal(h.timers.size, 0);
   });

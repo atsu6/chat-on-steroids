@@ -56,15 +56,20 @@ private endpoint の再送はここで停止した。API 移行は再検討対�
 ### 現行の送信方式
 
 `__cosVeniceSend.sendViaUi(text)` が実UIの `チャットメッセージ入力` TEXTAREA に
-native value setterで文字列を入れ、bubbling `input` と Enter の
-`keydown` / `keypress` / `keyup` を送る。private endpointへのfetch再現は使わない。
+native value setterで文字列を入れ、bubbling `input` の後、requestAnimationFrameを2回と50ms待つ。
+入力値が空なら停止する。有効な送信ボタンがあればさらに100ms待ってクリックし、
+ボタンなし・disabledならEnterの `keydown` / `keypress` / `keyup` を送る。
+キーイベントは `composed: true` / `isComposing: false`。
+private endpointへのfetch再現は使わない。
 既存 `sendTurn` は「403 のため未使用」として残す。
 
 記録中でなければ記録を開始し、呼び出し時の `chatProgress().lastChatNumber` を基準に、
-500ms間隔、最大90秒で新しいチャット応答本文の読み取り完了を待つ。
+初回送信トリガ後から500ms間隔、最大90秒で新しいチャット応答本文の読み取り完了を待つ。
+送信から2秒経ってもrecord番号が基準値のままの場合、Enterで1回だけnudgeする。
 `follow(cb)` はPOSTのチャットSSEを到着ごとの生テキスト差分とrecord番号で通知し、
 senderは同じrecordの差分を連結して `venice-sse.js` で解析する。
-`response.completed` で正常終了した応答のtextを返す。タイムアウトは基準値と最終進捗を含む例外にする。
+`response.completed` で正常終了した応答のtextを返す。タイムアウトは基準値と最終進捗に加え、
+入力値の文字数・ボタンの有無・disabled状態を含む例外にする。入力本文は診断に含めない。
 
 ### 未確認のこと
 

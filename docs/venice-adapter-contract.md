@@ -14,6 +14,17 @@
 モデル指定の引数はなく、旧 `sendTurn(messages, model)` の置き換えに伴い戻り値も
 Response ではなく本文文字列になっている。
 
+値の設定とinputイベントの後、requestAnimationFrameを2回と50ms待ち、入力値が空なら停止する。
+送信ボタン（`button[aria-label*="送信"]` または `button[type="submit"]`）が有効なら、
+さらに100ms待ってクリックする。ボタンなし・disabledならEnterへフォールバックする。
+Enterの3イベントは `composed: true` / `isComposing: false` を指定する。
+送信トリガ後に500ms間隔でchatProgressを確認し、2秒経ってもrecord番号が基準値のままの場合だけ、
+Enterをもう1回送る（nudgeは最大1回）。新しいrecordの本文が未完了でも、番号が進んでいればnudgeしない。
+応答待ちの上限90秒は初回の送信トリガ後から数える。
+タイムアウト例外は従来の `baseline` / `chatProgress` に加え、`textareaLength`、
+`buttonFound`、`buttonDisabled` を持ち、メッセージにも含める。ボタンなしのdisabled状態はnull。
+診断に入力本文そのものは含めない。
+
 2026-11-23のユーザー報告では、UI経由の1ターンでHTTP 200と本文「黄色い自転車」を取得した。
 これは本タスクでの再送・独立検証の結果ではなく、captureファイル名とrecord番号は未提供。
 詳細は `docs/venice-findings.md` の「2026-11-23 追記 — UI送信成功のユーザー報告」を参照。

@@ -218,6 +218,19 @@
     });
   }
 
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const sendButton = () => document.querySelector('button[aria-label*="送信"], button[type="submit"]');
+  const buttonDisabled = button => button.disabled || button.matches(':disabled');
+  function pressEnter(textarea) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      textarea.dispatchEvent(new KeyboardEvent(type, {
+        key: 'Enter', code: 'Enter', keyCode: 13, charCode: type === 'keypress' ? 13 : 0,
+        which: 13, bubbles: true, cancelable: true, composed: true, isComposing: false
+      }));
+    }
+  }
+
   let sending = false;
   async function sendViaUi(text) {
     if (typeof text !== 'string' || !text.trim()) throw new TypeError('text must be a non-empty string');
@@ -234,19 +247,27 @@
       if (number > baseline) bodies.set(number, (bodies.get(number) ?? '') + chunk);
     });
     sending = true;
-    const deadline = Date.now() + 90_000;
     try {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
       setter.call(textarea, text);
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      for (const type of ['keydown', 'keypress', 'keyup']) {
-        textarea.dispatchEvent(new KeyboardEvent(type, {
-          key: 'Enter', code: 'Enter', keyCode: 13, charCode: type === 'keypress' ? 13 : 0,
-          which: 13, bubbles: true, cancelable: true
-        }));
+      await nextFrame();
+      await nextFrame();
+      await sleep(50);
+      if (!textarea.value.trim()) throw new Error('待機後の TEXTAREA が空のため送信を停止しました。');
+      const button = sendButton();
+      if (button && !buttonDisabled(button)) {
+        await sleep(100);
+        if (button.isConnected && !buttonDisabled(button)) button.click();
+        else pressEnter(textarea);
+      } else {
+        pressEnter(textarea);
       }
+      const sentAt = Date.now();
+      const deadline = sentAt + 90_000;
+      let nudged = false;
       for (;;) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await sleep(500);
         const last = recon.chatProgress();
         if (Date.now() <= deadline && last.lastChatNumber > baseline && last.lastChatBodyComplete) {
           const parsed = parser.parse(bodies.get(last.lastChatNumber) ?? '');
@@ -256,10 +277,21 @@
           return parsed.text;
         }
         if (Date.now() >= deadline) {
-          const error = new Error(`Venice UI送信が90秒でタイムアウトしました: baseline=${baseline}, chatProgress=${JSON.stringify(last)}`);
+          const currentButton = sendButton();
+          const diagnostics = {
+            textareaLength: textarea.value.length,
+            buttonFound: Boolean(currentButton),
+            buttonDisabled: currentButton ? buttonDisabled(currentButton) : null
+          };
+          const error = new Error(`Venice UI送信が90秒でタイムアウトしました: baseline=${baseline}, chatProgress=${JSON.stringify(last)}, textarea.value.length=${diagnostics.textareaLength}, buttonFound=${diagnostics.buttonFound}, buttonDisabled=${diagnostics.buttonDisabled}`);
           error.baseline = baseline;
           error.chatProgress = last;
+          Object.assign(error, diagnostics);
           throw error;
+        }
+        if (!nudged && Date.now() - sentAt >= 2_000 && last.lastChatNumber === baseline) {
+          nudged = true;
+          pressEnter(textarea);
         }
       }
     } finally {
