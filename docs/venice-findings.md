@@ -981,3 +981,35 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - 次回は本書のsrc変更範囲とrun同意/caller契約の承認を得てから、合成応答とテスト用rootでreadの接続を実装する。
   現行のsrc編集禁止をこの文書作成で解除しない。private endpoint再送停止を維持する。
 - 今回の成果物は文書チェックとローカルcommitまで。実送信・pushはしない。
+
+## 2026-11-24 — A案の接続契約・wire型と合成モデルテスト
+
+### 分かったこと
+
+- 作業ディレクトリと直近logを確認した。開始HEADは `6cc6823c`、続く履歴は `ffa8acac` / `6d99720a`。
+  A案の採用とAGENTS.mdのElectron統合範囲に従い、今回は型・契約・合成テスト・文書に限定した。
+- `src/shared/venice-integration.ts` に `VeniceToolCallRequest` / `VeniceToolCallResponse` /
+  `VeniceRunGrant` の3型だけを追加した。runtime exportはなく、appのRPCやgatewayには接続していない。
+- コメントに、app発行のrun許可、実際の送信元照合、受付の副作用前永続化、call IDの同時予約、
+  同じ要求の記録再取得、異なるpayloadの拒否、run失効後の新規拒否、成否不明時の再実行禁止を定めた。
+- `test/venice-integration.test.ts` の8件が成功した。疑似永続化の完了前は実行0回、
+  同時重複・実行中の再取得・完了後の再取得を通じて実行1回、run失効後の新規呼び出し拒否を確認した。
+  保存待ち中の失効、clientが作ったrun ID、引数を変えたcall ID、受付/結果の保存失敗も合成モデルで確認した。
+- `node --check src/shared/venice-integration.ts` と `node --check test/venice-integration.test.ts` が成功した。
+  `npm test -- --run test/venice-integration.test.ts` と `npm run typecheck` も成功した。
+- 統合計画へ今回/次回の対象ファイルと承認UIの文言案を記載した。初回接続は `core/read` のみ。
+  将来のshell同意は「あなたの権限でコマンドを実行できます」「選択したフォルダー内に隔離されず」
+  「その外のファイルやネットワークにもアクセスできます」と明示し、read許可と分離する。
+- 根拠は型・契約コメント・合成テスト。実fixture・Venice通信は使っておらず、新しいcapture / record番号はない。
+
+### 不明なこと
+
+- 実gatewayでの排他・ディスク永続化・再起動復元・sender/session認証は未実装で、今回のモデル検証には含まない。
+- Venice chatの一意binding、画像添付UI、vision対応、既知の403原因・規約解釈・認証/attestation・
+  provider側の履歴保持・Content-Typeは未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 次の実装段階で、appの許可記録と実際のtab/documentを照合し、既存kernel経由のreadだけを接続する。
+  今回の契約モデルを実gatewayのテストへ適用し、同時受付・保存失敗・失効を実装に対して確認する。
+- 今回はローカルcommitまで。アプリ起動・ブラウザ操作・実送信・pushは行わない。
