@@ -16,11 +16,11 @@ const workerSource = section('// Venice work-tab bridge.', '/**\n * Best current
   section('function serializeTab(tab, operation)', '\n/** Best-effort telemetry');
 const keyFor = id => `cosVeniceWorkTab:${id}`;
 const senderFor = id => ({id: 'synthetic-extension', tab: {id}, frameId: 0,
-  url: 'https://venice.ai/chat/synthetic', origin: 'https://venice.ai'});
+  url: 'https://venice.ai/chat/synthetic', origin: 'https://venice.ai', documentId: `synthetic-document-${id}`});
 const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation = false, timers} = {}) {
+function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation = false, timers, localTransport} = {}) {
   const workDom = new JSDOM(html, {url: 'https://example.test/', runScripts: 'outside-only'});
   t.after(() => workDom.window.close());
   workDom.window.fetch = () => assert.fail('No network is allowed');
@@ -78,6 +78,8 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
     }}
   };
   vm.runInNewContext(workerSource, {
+    browserId: 'a'.repeat(32), load: async () => {},
+    call: localTransport ?? (async () => { throw new Error('Unexpected local transport'); }),
     chrome: api, URL, setTimeout: timers?.setTimeout ?? setTimeout, clearTimeout: timers?.clearTimeout ?? clearTimeout,
     tabOperationQueues: new Map(),
     HANDLERS: {synthetic_echo: async message => ({ok: true, result: message.value})},
@@ -96,8 +98,8 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
     }};
 }
 
-function agentHarness(t, {replies = [], html = '', owned = false} = {}) {
-  const h = worker(t, {html, owned});
+function agentHarness(t, {replies = [], html = '', owned = false, localTransport} = {}) {
+  const h = worker(t, {html, owned, localTransport});
   const brainDom = new JSDOM('<textarea>brain must stay untouched</textarea><button id="brain">brain</button>', {
     url: 'https://venice.ai/chat/synthetic', runScripts: 'outside-only'
   });

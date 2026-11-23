@@ -1,3 +1,5 @@
+import { veniceToolGateway, veniceSenderSchema } from './venice-tool-gateway.js';
+import { createSession as createVeniceDebugSession } from './session/store.js';
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
@@ -808,6 +810,25 @@ export function personsMessage(entry: InputEntry): boolean {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  // Temporary development-only grant owner; no UI, no generic IPC or root approval.
+  handle('venice:debugGrant', async (payload, event) => {
+    const window = getWindow();
+    if (app.isPackaged || process.env.NODE_ENV_ELECTRON_VITE !== 'development' ||
+        !window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) {
+      throw new Error('venice_debug_disabled');
+    }
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('grant'), sessionId: z.string().regex(/^\d{4}-\d{2}-\d{2}-[a-f0-9]{8}$/),
+        roots: z.array(z.string().min(1).max(4096)).min(1).max(16), sender: veniceSenderSchema }).strict(),
+      z.object({ action: z.literal('revoke'), runId: z.string().uuid() }).strict()
+    ]).parse(payload);
+    if (request.action === 'revoke') return { revoked: veniceToolGateway.revoke(request.runId) };
+    const session = await getSession(request.sessionId);
+    if (!session) await createVeniceDebugSession({ reservedId: request.sessionId,
+      title: 'Venice debug tools', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
+    const grant = await veniceToolGateway.grant(request.sessionId, request.roots, request.sender);
+    return { runId: grant.runId };
+  });
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);

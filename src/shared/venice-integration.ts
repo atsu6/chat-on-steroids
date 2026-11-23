@@ -6,7 +6,7 @@
  * session, root or sender binding as proof. Check the authenticated extension's actual
  * tab/document against the stored grant, plus live permissions, before admitting work.
  *
- * Call lifecycle (owned by the future main-process gateway):
+ * Call lifecycle (owned by the main-process gateway):
  *   unseen -> pending: reserve callId before any await; durably save acceptance BEFORE
  *                      any side effect. Failed persistence must execute nothing.
  *   pending -> completed: execute at most once, then durably save the result/error

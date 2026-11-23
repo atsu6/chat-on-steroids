@@ -209,6 +209,7 @@ export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'too
  * an inferred call.
  */
 export type CallAttribution =
+  | 'host_admitted'
   | 'request_id'
   | 'unattributed'
   | 'superseded'
@@ -233,10 +234,13 @@ export type CallAttribution =
  * and a record that is missing half the work is not more truthful than one that says how
  * it placed each call.
  *
+ * `host_admitted` names an app-approved local run, not a provider request-id proof.
+ *
  * `inferred` is on the records in the unattributed stream, which is where everything else
  * goes rather than being guessed into somebody's history.
  */
 export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
+  host_admitted: 'app-approved run',
   request_id: 'exact request id',
   unattributed: 'request id not resolved',
   superseded: 'retired conversation',
