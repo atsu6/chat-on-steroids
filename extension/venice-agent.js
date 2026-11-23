@@ -1,8 +1,9 @@
-const CONTRACT = `あなたは現在のタブのDOMを操作するエージェントです。必ず次のどちらか1つだけを出力してください。前後に地の文を書かないこと。
+const CONTRACT = `あなたは作業用タブのDOMを操作するエージェントです。Veniceのタブは脳として残し、操作しません。必ず次のどちらか1つだけを出力してください。前後に地の文を書かないこと。
 {"action":"tool","name":"<name>","args":{...}}
 {"action":"done","summary":"<完了報告>"}
 利用可能なツール:
 now() -> 現在時刻のISO文字列
+tab_open({url}) -> 作業用タブを作成または指定URLへ遷移してURLを返す。DOMツールの前に実行する
 query({selector}) -> 件数と最大20件の番号・tagName・id・クラス先頭・テキスト先頭40文字
 read_text({selector?}) -> 指定要素（省略時body）のinnerText、空白を畳んで最大2000文字
 click_selector({selector}) -> 最初の一致要素へスクロールしてclick。okはclickイベント発生の確認で、処理完了の確認ではない
@@ -70,51 +71,39 @@ function createAgent(sendViaUi) {
   return {runTurn, runTask};
 }
 
-const compactText = text => text.replace(/\s+/g, ' ').trim();
-function requireSelector(selector) {
-  if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
-  return selector;
+// MAIN has no Chrome APIs. Only the Venice ISOLATED bridge can forward this request.
+function callVeniceBridge(op, args = {}) {
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const finish = (reply) => {
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      if (reply.ok) resolve(reply.result);
+      else reject(new Error(reply.error || 'Venice bridge failed'));
+    };
+    const onMessage = event => {
+      if (event.source !== window || event.origin !== 'https://venice.ai') return;
+      const reply = event.data?.__cosVeniceBridgeReply;
+      if (reply?.id !== id || typeof reply.ok !== 'boolean') return;
+      finish(reply);
+    };
+    const timer = setTimeout(() => finish({ok: false, error: `Venice bridge timed out: op=${op}`}), 45_000);
+    window.addEventListener('message', onMessage);
+    try {
+      window.postMessage({__cosVeniceBridge: {id, op, args}}, 'https://venice.ai');
+    } catch (error) {
+      finish({ok: false, error: error.message});
+    }
+  });
 }
 
 const TOOL_REGISTRY = Object.freeze({
   now: () => new Date().toISOString(),
-  query: ({selector} = {}) => {
-    const nodes = document.querySelectorAll(requireSelector(selector));
-    return {count: nodes.length, matches: Array.from(nodes).slice(0, 20).map((element, i) => ({
-      index: i + 1, tagName: element.tagName, id: element.id,
-      className: (element.getAttribute('class') ?? '').slice(0, 80),
-      text: compactText(element.textContent ?? '').slice(0, 40)
-    }))};
-  },
-  read_text: ({selector} = {}) => {
-    const element = selector === undefined ? document.body : document.querySelector(requireSelector(selector));
-    if (!element) throw new Error('Element not found');
-    return compactText(element.innerText).slice(0, 2000);
-  },
-  click_selector: ({selector} = {}) => {
-    const element = document.querySelector(requireSelector(selector));
-    if (!element) throw new Error('Element not found');
-    if (element.matches(':disabled') || element.closest('[inert]') || typeof element.click !== 'function') {
-      throw new Error('Element cannot be clicked');
-    }
-    element.scrollIntoView({block: 'center', inline: 'nearest'});
-    if (!element.isConnected) throw new Error('Element was detached before click');
-    let clicked = false;
-    const onClick = () => { clicked = true; };
-    element.addEventListener('click', onClick, {capture: true});
-    try {
-      element.click();
-    } finally {
-      element.removeEventListener('click', onClick, {capture: true});
-    }
-    if (!clicked) throw new Error('No click event was observed');
-    return {clicked: true};
-  },
-  scroll: ({dy} = {}) => {
-    if (typeof dy !== 'number' || !Number.isFinite(dy)) throw new TypeError('dy must be a finite number');
-    window.scrollBy(0, dy);
-    return window.scrollY;
-  },
+  tab_open: async ({url} = {}) => (await callVeniceBridge('ensureTab', {url})).url,
+  query: (args = {}) => callVeniceBridge('eval', {name: 'query', args}),
+  read_text: (args = {}) => callVeniceBridge('eval', {name: 'read_text', args}),
+  click_selector: (args = {}) => callVeniceBridge('eval', {name: 'click_selector', args}),
+  scroll: (args = {}) => callVeniceBridge('eval', {name: 'scroll', args}),
 });
 
 async function executeTool(name, args) {

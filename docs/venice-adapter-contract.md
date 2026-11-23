@@ -34,9 +34,12 @@ fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの
 
 `executeTool(name, args)` は成功時 `{ok: true, result}`、登録済みツールの失敗時は
 `{ok: false, error}` を返す。未登録名の直接呼び出しは従来どおり例外になる。
-各ツールの引数はJSONオブジェクトで、Chrome APIや他タブにはアクセスしない。
+各ツールの引数はJSONオブジェクト。MAINからChrome APIは呼ばず、DOM操作は専用の作業タブへ転送する。
+これらのDOMツールがVenice脳タブを直接参照・操作する経路は残さない。
 
 - `now` / `{}`: 現在時刻のISO文字列。既存の戻り値を維持する。
+- `tab_open` / `{url}`: 作業タブを作成し、既にあればそのタブを指定URLへ遷移させる。
+  HTTP(S)の絶対URLのみ受け付け、読み込み後のURLを返す。リダイレクト先もこの戻り値に反映する。
 - `query` / `{selector}`: `querySelectorAll` の総件数 `count` と最大20件の `matches`。
   各行は1始まりの `index`、`tagName`、`id`、`className` の先頭80文字、
   空白を畳んだ `textContent` の先頭40文字を持つ。
@@ -47,6 +50,10 @@ fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの
   対象なし、disabled、inert、切断済み、イベント未発生は `ok: false`。
   クリック先のアプリ処理・通信の成功までは意味しない。
 - `scroll` / `{dy}`: 有限の数値を受け取り、`window.scrollBy(0, dy)` 後の `scrollY` を返す。
+
+DOMツールの前に `tab_open` を実行する。作業タブがない場合はすべて
+`{ok: false, error: '作業タブがありません。先に tab_open(url) を実行してください。'}` を返す。
+別のタブやVeniceタブへフォールバックしない。
 
 `runTask(instruction, {maxSteps?})` は毎ステップ、同じ指示と直前のツール結果で
 `runTurn` を呼ぶ。既定10ステップ、40超の指定は40に制限する。
@@ -59,11 +66,47 @@ fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの
 
 検証は合成DOM・合成モデル応答のみ。実Veniceでのタスクループは実行していない。
 
+## MAINから作業タブへのブリッジ
+
+`venice-bridge.js` は `https://venice.ai/*` のみに ISOLATED / document_start で登録する。
+経路は `venice-agent.js`（MAIN）→ window message → `venice-bridge.js`（ISOLATED）→
+`chrome.runtime.sendMessage` → `background.js` のVenice専用分岐。
+既存のChatGPTメッセージ処理は変更しない。
+
+要求は `{__cosVeniceBridge: {id, op, args}}`、応答は
+`{__cosVeniceBridgeReply: {id, ok, result?, error?}}`。
+ISOLATEDは同じwindow・originが `https://venice.ai` の要求だけを、固定type
+`cos-venice-bridge` で転送する。backgroundでも拡張ID、送信元URL/origin、トップフレーム、
+脳タブの現在URLを検査する。idは応答の対応付けであり、認証情報ではない。
+同じVeniceページ内のJavaScriptもこのブリッジを呼べる。
+
+backgroundは脳タブごとに1つの作業タブを所有し、IDを
+`chrome.storage.session` の `cosVeniceWorkTab:<brainTabId>` に保存する。
+要求は既存の `serializeTab` で脳タブごとに直列化する。worker再起動後も保存IDを再利用する。
+
+- `ensureTab` / `{url}`: 未作成なら `tabs.create({url, active: false})`。
+  既存なら `tabs.update(tabId, {url})`。読み込み完了を最大30秒待ち、
+  `{ok: true, result: {tabId, url}}` を返す。Veniceタブは遷移させない。
+- `eval` / `{name, args}`: background内の固定関数表にあるDOM 4ツールだけを
+  `scripting.executeScript` で作業タブのトップフレーム・ISOLATEDに実行する。
+  任意コードや関数名の式評価は受け付けない。戻り値はDOMツールの `{ok, result?, error?}`。
+- `activate`: 作業タブへ `tabs.update(tabId, {active: true})`。
+- `close`: 作業タブを閉じ、保存したIDを削除する。
+
+ensureTab以外は作業タブがないと失敗する。手動で閉じたIDは次の要求で削除し、
+明示的なensureTabだけが再作成する。Chrome APIの拒否をタブ不在と扱って再作成しない。
+MAINは45秒で応答待ちを打ち切り、イベントリスナーを解除する。自動再実行はしない。
+タイムアウトは操作の取消を意味しないため、再試行前にタブの状態を確認する。
+
 ```sh
 cd /Users/atsu/chat-on-venice
+node --check extension/background.js
+node --check extension/venice-bridge.js
 node --check extension/venice-agent.js
 node --check test/venice-agent.test.cjs
-node --test test/venice-agent.test.cjs test/venice-ui-send.test.cjs
+node --check test/venice-bridge-harness.cjs
+node --check test/venice-bridge.test.cjs
+node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-ui-send.test.cjs
 ```
 
 ## 取得済みSSEのオフライン解析
