@@ -3,7 +3,7 @@
   'use strict';
   if (location.origin !== 'https://venice.ai' || window.__cosVeniceRecon) return;
 
-  const MAX_REQUESTS = 8;
+  const MAX_REQUESTS = 200;
   const MAX_BODY_BYTES = 1024 * 1024;
   const MAX_CHUNKS = 2048;
   const REDACTED = '[REDACTED]';
@@ -125,8 +125,11 @@
     return body;
   }
   function newRecord(owner, request, body) {
-    if (!owner.recording || owner.records.length >= MAX_REQUESTS) return null;
-    const record = { number: owner.records.length + 1, observedAt: new Date().toISOString(),
+    if (!owner.recording) return null;
+    // The latest insertion owns this flag; merely filling 200 slots is not truncation.
+    owner.limitReached = owner.records.length >= MAX_REQUESTS;
+    if (owner.limitReached) owner.records.shift();
+    const record = { number: owner.nextNumber++, observedAt: new Date().toISOString(),
       request: { ...request, body }, response: null, networkError: '' };
     owner.records.push(record);
     return record;
@@ -137,12 +140,13 @@
     window.fetch = function (...args) {
       const owner = session;
       let request = null, record = null;
-      if (owner?.recording && owner.records.length < MAX_REQUESTS) {
+      if (owner?.recording) {
         try {
           const [input, init] = args;
           const rawURL = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
           const url = new URL(rawURL, location.href);
-          if (url.protocol === 'https:' && (url.hostname === 'venice.ai' || url.hostname.endsWith('.venice.ai'))) {
+          if (url.protocol === 'https:' && (url.hostname === 'venice.ai' || url.hostname.endsWith('.venice.ai')) &&
+              !['t.venice.ai', 'clerk.venice.ai'].includes(url.hostname) && url.pathname.includes('/api/inference/')) {
             const method = String(init?.method || input?.method || 'GET').toUpperCase();
             request = { url: safeURL(url.href, owner), method,
               headers: headersOf(init?.headers ?? input?.headers, owner),
@@ -172,9 +176,14 @@
     };
     installed = true;
   }
+  function summary() {
+    return (session?.records ?? []).map(r => ({ number: r.number, url: r.request.url, method: r.request.method,
+      status: r.response?.status ?? null, complete: Boolean(r.response?.body?.complete),
+      text: r.response?.body?.text ?? '' }));
+  }
   function status() {
     return { installed, recording: Boolean(session?.recording), requests: session?.records.length ?? 0,
-      readingBodies: session?.readers.size ?? 0, limitReached: session?.records.length === MAX_REQUESTS };
+      readingBodies: session?.readers.size ?? 0, limitReached: Boolean(session?.limitReached) };
   }
   function progress() {
     const last = session?.records.at(-1);
@@ -191,7 +200,8 @@
   function start() {
     if (!installed) throw new Error('usage.js の Venice トレースが未注入です。ページを再読み込みしてください。');
     if (session?.recording) throw new Error('既に記録中です。先に save() または stop() を実行してください。');
-    session = { startedMs: Date.now(), recording: true, records: [], readers: new Set(), secrets: new Set() };
+    session = { startedMs: Date.now(), recording: true, records: [], nextNumber: 1, limitReached: false,
+      readers: new Set(), secrets: new Set() };
     return status();
   }
   function stop() {
@@ -215,7 +225,7 @@
       unobservable: ['browser-added Cookie header (including HttpOnly session cookies)',
         'Set-Cookie header', 'XMLHttpRequest', 'WebSocket', 'EventSource'],
       limits: { requests: MAX_REQUESTS, bytesPerBody: MAX_BODY_BYTES, chunksPerBody: MAX_CHUNKS },
-      limitReached: session.records.length === MAX_REQUESTS,
+      limitReached: session.limitReached,
       records: session.records
     };
     // Sanitize string values before JSON escaping, including echoed credentials in bodies.
@@ -228,5 +238,5 @@
     setTimeout(() => URL.revokeObjectURL(blobURL), 60_000);
     return { filename, requests: session.records.length, savedBy: 'browser-download' };
   }
-  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status, progress, follow, chatProgress });
+  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status, summary, progress, follow, chatProgress });
 })();

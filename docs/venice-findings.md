@@ -852,3 +852,40 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 実UIで確認する際は、修正後のsenderがボタンの遅延出現を待ち、record番号が進むかを確認する。
   今回は合成検証とローカルcommitまでで停止し、送信・pushはしない。
+
+## 2026-11-24 — 推論通信だけの記録と最新200件リングバッファ（実送信なし）
+
+### 分かったこと
+
+- ユーザー実測報告では、記録が8件の上限に達してlimitReached=trueになり、それ以降のチャット送信が
+  記録されなかった。t.venice.aiの計測通信も記録枠を使っていたとの報告。
+  根拠は本チャットのユーザー実測報告。対応するcaptureファイル名・record番号は未提供。
+- venice-recon.jsの対象を、従来のVenice HTTPSホスト条件に加えて、パスに `/api/inference/` を含む通信に
+  限定した。t.venice.ai / clerk.venice.aiも明示的に除外する。
+  計測・認証・`/api/app/user/client_attestation/mint` 等は記録せず、本文も複製しない。
+- MAX_REQUESTSを200にし、満杯で新しい記録を追加する場合は最古を破棄する。
+  numberはsession.nextNumberで管理し、配列長とは独立して単調増加する。
+  以前と同じく新しいstart()で番号は1から始まる。
+- status()と保存JSONのlimitReachedを「直近のレコード追加で破棄が起きたか」に変更した。
+  200件ちょうどではfalse、201件目からの破棄でtrue。対象外通信・状態参照・stop/saveで消費せず、
+  新しいstart()でfalseに戻す。従来の「上限到達」の意味とは区別する。
+- 既存のsummary追加差分を維持してコミットに含める。progress / chatProgress / summary / followの形は維持し、
+  200件超の最新チャットも本文・record番号付きで通知する。元fetchは1回だけ呼び、元Promiseと元Responseを保つ。
+- 実装と影響する2テストファイルのnode --checkが成功した。
+  `docs/venice-recon.test.cjs` の18件と `test/venice-ui-send.test.cjs` の21件、計39件の合成検証が成功。
+  対象外URL、205件追加後の最新200件と連番、limitReached、summaryの形、followとchatProgress、
+  破棄済みの遅延レスポンス、満杯からのsendViaUiによる201件目の取得を確認した。
+  既存の本文上限・伏字・SSE・停止・購読解除も検証した。テストの合成URLを新しい対象範囲へ合わせ、
+  Venice用manifestの古い期待値を現在のMAIN/ISOLATED登録へ更新した。
+- 今回の実送信・実ブラウザ操作は0回。新しいcapture / record番号はない。
+  上記のコード検証はローカル合成テストであり、ユーザーの実測報告と区別する。
+
+### 不明なこと
+
+- 修正後の実UIで、長時間の連続使用による上限到達が解消するかは未検証。
+- 既知のprivate endpointの403原因、規約解釈、認証等の不明点は未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 実UIで確認する際は、200件を超えてもrequestsが200のままlastNumber / lastChatNumberが進むかを確認する。
+  今回は合成検証とローカルcommitまでで停止し、送信・pushはしない。

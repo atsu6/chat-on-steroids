@@ -60,7 +60,7 @@ test('progress reports only scalar completion metadata for empty and pending rec
   assert.deepEqual({ ...h.api.progress() }, empty);
   h.api.start();
   assert.deepEqual({ ...h.api.progress() }, { ...empty, recording: true });
-  h.window.fetch('/unknown', { method: 'POST', headers: { Authorization: 'Bearer synthetic-progress-secret' }, body: 'private fixture text' });
+  h.window.fetch('/api/inference/unknown', { method: 'POST', headers: { Authorization: 'Bearer synthetic-progress-secret' }, body: 'private fixture text' });
   assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 1, lastNumber: 1, lastBodyComplete: false, lastStatus: null });
   resolve(new Response('private fixture response'));
   await h.settle();
@@ -83,12 +83,12 @@ test('progress distinguishes an open response body from a completed body and fol
     { headers: { 'content-type': 'text/event-stream' } });
   const h = harness(() => Promise.resolve(++calls === 1 ? response : new Response('rate limited', { status: 429 })));
   h.api.start();
-  await h.window.fetch('/unknown', { method: 'POST' });
+  await h.window.fetch('/api/inference/unknown', { method: 'POST' });
   assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 1, lastNumber: 1, lastBodyComplete: false, lastStatus: 200 });
   controller.close();
   await h.settle();
   assert.equal(h.api.progress().lastBodyComplete, true);
-  await h.window.fetch('/unknown', { method: 'POST' });
+  await h.window.fetch('/api/inference/unknown', { method: 'POST' });
   await h.settle();
   assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 2, lastNumber: 2, lastBodyComplete: true, lastStatus: 429 });
 });
@@ -104,10 +104,10 @@ test('manual opt-in preserves the exact native promise, arguments and SSE body',
   assert.equal(h.api.status().requests, 0);
   h.api.start();
   const init = { method: 'POST', body: '{"synthetic":"request"}' };
-  const result = h.window.fetch('/unknown-send-route', init);
+  const result = h.window.fetch('/api/inference/unknown-send-route', init);
   assert.equal(result, nativePromise);
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].args[0], '/unknown-send-route');
+  assert.equal(calls[1].args[0], '/api/inference/unknown-send-route');
   assert.equal(calls[1].args[1], init);
   await h.settle();
   const { capture } = await h.save();
@@ -131,7 +131,7 @@ test('credentials are redacted before JSON escaping, including cookies and body 
     } }));
   });
   h.api.start();
-  await h.window.fetch('/unknown?session=synthetic-query-secret', {
+  await h.window.fetch('/api/inference/unknown?session=synthetic-query-secret', {
     method: 'POST', credentials: 'include', headers: {
       aUtHoRiZaTiOn: `Bearer ${token}`, Cookie: `session=${cookie}; another=synthetic-another-cookie`
     }, body: '{"messages":[{"text":"not a secret"}],"access_token":"synthetic-body-token"}'
@@ -153,10 +153,10 @@ test('credentials are redacted before JSON escaping, including cookies and body 
 
 test('Request bodies are cloned, and unsupported init bodies remain explicitly unknown', async () => {
   const h = harness(() => Promise.resolve(new Response('synthetic response')));
-  const request = new Request('https://venice.ai/unknown', { method: 'POST', body: 'original request text' });
+  const request = new Request('https://venice.ai/api/inference/unknown', { method: 'POST', body: 'original request text' });
   h.api.start();
   await h.window.fetch(request);
-  await h.window.fetch('/unknown', { method: 'POST', body: new Blob(['synthetic blob']) });
+  await h.window.fetch('/api/inference/unknown', { method: 'POST', body: new Blob(['synthetic blob']) });
   await h.settle();
   const { capture } = await h.save();
   assert.equal(capture.records[0].request.body.text, 'original request text');
@@ -177,7 +177,7 @@ test('UTF-8 split across read chunks preserves Japanese text and raw SSE framing
   } }), { headers: { 'content-type': 'text/event-stream' } });
   const h = harness(() => Promise.resolve(response));
   h.api.start();
-  await h.window.fetch('/unknown', { method: 'POST' });
+  await h.window.fetch('/api/inference/unknown', { method: 'POST' });
   await h.settle();
   const { capture } = await h.save();
   const body = capture.records[0].response.body;
@@ -192,29 +192,29 @@ test('GET is retained only for observed SSE; foreign destinations are not retain
     headers: { 'content-type': String(url).includes('sse') ? 'text/event-stream' : 'application/json' }
   })));
   h.api.start();
-  await h.window.fetch('/not-a-stream');
-  await h.window.fetch('https://unrelated.example/unknown', { method: 'POST' });
-  await h.window.fetch('https://api.venice.ai/unknown-sse');
+  await h.window.fetch('/api/inference/not-a-stream');
+  await h.window.fetch('https://unrelated.example/api/inference/unknown', { method: 'POST' });
+  await h.window.fetch('https://api.venice.ai/api/inference/unknown-sse');
   await h.settle();
   const { capture } = await h.save();
   assert.equal(capture.records.length, 1);
   assert.equal(capture.records[0].request.method, 'GET');
-  assert.equal(capture.records[0].request.url, 'https://api.venice.ai/unknown-sse');
+  assert.equal(capture.records[0].request.url, 'https://api.venice.ai/api/inference/unknown-sse');
   assert.deepEqual(capture.records[0].request.headers, {});
 });
 
-test('body and request limits bound observation without truncating the native response', async () => {
+test('body limits bound observation without truncating the native response', async () => {
   const large = 'x'.repeat(1024 * 1024 + 37);
   let calls = 0;
   const h = harness(() => { calls++; return Promise.resolve(new Response(large)); });
   h.api.start();
-  const response = await h.window.fetch('/unknown', { method: 'POST' });
-  for (let i = 0; i < 9; i++) await h.window.fetch('/unknown', { method: 'POST' });
+  const response = await h.window.fetch('/api/inference/unknown', { method: 'POST' });
+  for (let i = 0; i < 9; i++) await h.window.fetch('/api/inference/unknown', { method: 'POST' });
   await h.settle();
   const { capture } = await h.save();
   assert.equal(calls, 10);
-  assert.equal(capture.records.length, 8);
-  assert.equal(capture.limitReached, true);
+  assert.equal(capture.records.length, 10);
+  assert.equal(capture.limitReached, false);
   assert.equal(capture.records[0].response.body.bytesCaptured, 1024 * 1024);
   assert.equal(capture.records[0].response.body.complete, false);
   assert.equal(capture.records[0].response.body.limitation, 'body-byte-limit');
@@ -227,7 +227,7 @@ test('stopping a live clone does not cancel the user stream or wait for it to fi
     { headers: { 'content-type': 'text/event-stream' } });
   const h = harness(() => Promise.resolve(response));
   h.api.start();
-  await h.window.fetch('/unknown', { method: 'POST' });
+  await h.window.fetch('/api/inference/unknown', { method: 'POST' });
   controller.enqueue(new TextEncoder().encode('data: synthetic-start\n\n'));
   for (let i = 0; i < 5; i++) await tick();
   const { capture } = await h.save();
@@ -248,17 +248,17 @@ test('late responses cannot cross recording sessions, and failures are not retri
   const h = harness(() => (++calls === 1 ? old : rejected));
   h.api.start();
   assert.throws(() => h.api.start(), /既に記録中/);
-  h.window.fetch('/old', { method: 'POST' });
+  h.window.fetch('/api/inference/old', { method: 'POST' });
   h.api.stop(); h.api.start();
   resolve(new Response('old response'));
-  const result = h.window.fetch('/new', { method: 'POST' });
+  const result = h.window.fetch('/api/inference/new', { method: 'POST' });
   assert.equal(result, rejected);
   await assert.rejects(result, /synthetic network failure/);
   await h.settle();
   const { capture } = await h.save();
   assert.equal(calls, 2);
   assert.equal(capture.records.length, 1);
-  assert.equal(capture.records[0].request.url, 'https://venice.ai/new');
+  assert.equal(capture.records[0].request.url, 'https://venice.ai/api/inference/new');
   assert.equal(capture.records[0].networkError, 'fetch-rejected');
   assert.equal(capture.records[0].response, null);
 });
@@ -280,10 +280,11 @@ test('Venice injection is host-scoped, with unchanged ChatGPT content-script ent
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.ok(manifest.host_permissions.includes('https://venice.ai/*'));
   const venice = manifest.content_scripts.filter(entry => entry.matches.includes('https://venice.ai/*'));
-  assert.equal(venice.length, 1);
+  assert.equal(venice.length, 2);
   assert.equal(venice[0].world, 'MAIN');
   assert.equal(venice[0].run_at, 'document_start');
-  assert.deepEqual(venice[0].js, ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'usage.js']);
+  assert.deepEqual(venice[0].js, ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'venice-agent.js', 'usage.js']);
+  assert.deepEqual(venice[1], {matches: ['https://venice.ai/*'], js: ['venice-bridge.js'], world: 'ISOLATED', run_at: 'document_start'});
   const chatgpt = manifest.content_scripts.filter(entry => entry.matches.includes('https://chatgpt.com/*'));
   assert.deepEqual(chatgpt, [
     { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
@@ -299,14 +300,14 @@ test('chatProgress ignores helper requests and reports only the latest chat reco
   const empty = { lastChatNumber: 0, lastChatBodyComplete: false, lastChatStatus: null };
   assert.deepEqual({ ...h.api.chatProgress() }, empty);
   h.api.start();
-  await h.window.fetch('/helper', { method: 'POST' });
+  await h.window.fetch('/api/inference/helper', { method: 'POST' });
   await h.settle();
   assert.deepEqual({ ...h.api.chatProgress() }, empty);
   await h.window.fetch('/api/inference/chat/agents/venice', { method: 'POST' });
   await h.settle();
   const expected = { lastChatNumber: 2, lastChatBodyComplete: true, lastChatStatus: 403 };
   assert.deepEqual({ ...h.api.chatProgress() }, expected);
-  await h.window.fetch('/helper', { method: 'POST' });
+  await h.window.fetch('/api/inference/helper', { method: 'POST' });
   await h.settle();
   assert.equal(h.api.progress().lastStatus, 200);
   assert.deepEqual({ ...h.api.chatProgress() }, expected);
@@ -327,7 +328,7 @@ test('follow delivers live raw POST chat SSE deltas with record numbers and unsu
   const stopBroken = h.api.follow(() => { throw new Error('synthetic subscriber failure'); });
   const unsubscribe = h.api.follow((text, number) => chunks.push({ text, number }));
   h.api.start();
-  await h.window.fetch('/helper', { method: 'POST' });
+  await h.window.fetch('/api/inference/helper', { method: 'POST' });
   await h.window.fetch('/api/inference/chat/get');
   await h.window.fetch('/api/inference/chat/json', { method: 'POST' });
   await h.settle();
@@ -350,4 +351,131 @@ test('follow delivers live raw POST chat SSE deltas with record numbers and unsu
   await h.window.fetch('/api/inference/chat/next', { method: 'POST' });
   await h.settle();
   assert.equal(chunks.length, count);
+});
+
+test('only inference paths on Venice hosts are recorded; telemetry, auth and attestation never consume slots', async () => {
+  let observing = false, nativePromise, calls = 0;
+  const h = harness(() => {
+    calls++;
+    const response = new Response('synthetic', {headers: {'content-type': 'text/event-stream'}});
+    if (!observing) response.clone = () => assert.fail('Excluded traffic must not be cloned');
+    nativePromise = Promise.resolve(response);
+    return nativePromise;
+  });
+  h.api.start();
+  const excluded = [
+    'https://t.venice.ai/events', 'https://clerk.venice.ai/v1/client/sessions/synthetic/tokens',
+    'https://outerface.venice.ai/api/app/user/client_attestation/mint', '/api/app/user/client_attestation/mint',
+    '/helper', '/api/other?next=/api/inference/chat/decoy', '/api/other#/api/inference/chat/decoy',
+    'https://unrelated.example/api/inference/chat/foreign', 'https://venice.ai.evil.test/api/inference/chat/foreign',
+    'http://venice.ai/api/inference/chat/insecure', 'https://t.venice.ai/api/inference/telemetry',
+    'https://clerk.venice.ai/api/inference/auth'
+  ];
+  for (const url of excluded) {
+    const result = h.window.fetch(url, {method: 'POST'});
+    assert.equal(result, nativePromise);
+    await result;
+  }
+  await h.settle();
+  assert.equal(calls, excluded.length);
+  assert.equal(h.api.status().requests, 0);
+  assert.equal(h.api.status().limitReached, false);
+  assert.equal(h.api.progress().lastNumber, 0);
+  assert.equal(h.api.summary().length, 0);
+  observing = true;
+  await h.window.fetch('/api/inference/chat/synthetic', {method: 'POST'});
+  await h.window.fetch(new h.window.URL('https://outerface.venice.ai/api/inference/synthetic'), {method: 'POST'});
+  await h.settle();
+  assert.deepEqual(Array.from(h.api.summary(), row => row.number), [1, 2]);
+});
+
+test('ring retains the latest 200 records with consecutive numbers and reports actual eviction, not capacity', async () => {
+  let calls = 0;
+  const h = harness(() => Promise.resolve(new Response(String(++calls))));
+  assert.equal(h.api.status().limitReached, false);
+  h.api.start();
+  for (let number = 1; number <= 200; number++) {
+    await h.window.fetch('/api/inference/synthetic', {method: 'POST'});
+    assert.equal(h.api.progress().lastNumber, number);
+  }
+  await h.settle();
+  assert.equal(h.api.status().requests, 200);
+  assert.equal(h.api.status().limitReached, false);
+  // An unretained GET must neither evict a record nor consume a sequence number.
+  await h.window.fetch('/api/inference/not-sse');
+  assert.equal(h.api.progress().lastNumber, 200);
+  assert.equal(h.api.status().limitReached, false);
+  for (let number = 201; number <= 205; number++) {
+    await h.window.fetch('/api/inference/synthetic', {method: 'POST'});
+    assert.equal(h.api.progress().requests, 200);
+    assert.equal(h.api.progress().lastNumber, number);
+    assert.equal(h.api.status().limitReached, true);
+  }
+  await h.settle();
+  const summary = h.api.summary();
+  assert.equal(summary.length, 200);
+  const numbers = Array.from({length: 200}, (_, i) => i + 6);
+  assert.deepEqual(Array.from(summary, row => row.number), numbers);
+  assert.deepEqual(Object.keys(summary[0]), ['number', 'url', 'method', 'status', 'complete', 'text']);
+  assert.equal(summary.at(-1).text, '206'); // The unrecorded GET still reached native fetch once.
+  summary[0].number = -1;
+  summary.pop();
+  assert.equal(h.api.summary()[0].number, 6);
+  assert.equal(h.api.summary().length, 200);
+  await h.window.fetch('https://t.venice.ai/events', {method: 'POST'});
+  assert.equal(h.api.status().limitReached, true); // Excluded traffic does not reset the last-insertion flag.
+  assert.equal(h.api.stop().limitReached, true);
+  const {capture} = await h.save();
+  assert.equal(capture.limits.requests, 200);
+  assert.equal(capture.limitReached, true);
+  assert.deepEqual(capture.records.map(row => row.number), numbers);
+  const fresh = h.api.start();
+  assert.equal(fresh.limitReached, false);
+  assert.equal(fresh.requests, 0);
+  await h.window.fetch('/api/inference/synthetic', {method: 'POST'});
+  await h.settle();
+  assert.equal(h.api.progress().lastNumber, 1); // Sequence scope remains one start/stop recording session.
+  h.api.stop();
+});
+
+test('chatProgress, summary and follow still report the latest chat after the ring is full', async () => {
+  const raw = 'event: synthetic\ndata: {"text":"latest chat"}\n\n';
+  const h = harness(url => Promise.resolve(new Response(String(url).includes('/chat/') ? raw : 'helper', {
+    headers: {'content-type': String(url).includes('/chat/') ? 'text/event-stream' : 'application/json'}
+  })));
+  const chunks = [];
+  const unsubscribe = h.api.follow((text, number) => chunks.push({text, number}));
+  h.api.start();
+  for (let i = 0; i < 200; i++) await h.window.fetch('/api/inference/helper', {method: 'POST'});
+  await h.settle();
+  const response = await h.window.fetch('/api/inference/chat/synthetic', {method: 'POST'});
+  await h.settle();
+  assert.equal(h.api.status().requests, 200);
+  assert.equal(h.api.progress().lastNumber, 201);
+  assert.deepEqual({...h.api.chatProgress()}, {lastChatNumber: 201, lastChatBodyComplete: true, lastChatStatus: 200});
+  assert.equal(h.api.summary().at(-1).text, raw);
+  assert.equal(chunks.map(row => row.text).join(''), raw);
+  assert.ok(chunks.length > 0 && chunks.every(row => row.number === 201));
+  assert.equal(await response.text(), raw);
+  unsubscribe(); h.api.stop();
+});
+
+test('an evicted pending response cannot overwrite or reinsert into the latest ring records', async () => {
+  let resolve, calls = 0;
+  const pending = new Promise(done => { resolve = done; });
+  const h = harness(() => ++calls === 1 ? pending : Promise.resolve(new Response(`record ${calls}`)));
+  h.api.start();
+  assert.equal(h.window.fetch('/api/inference/chat/pending', {method: 'POST'}), pending);
+  for (let i = 0; i < 200; i++) await h.window.fetch('/api/inference/helper', {method: 'POST'});
+  const original = new Response('late old response');
+  resolve(original);
+  await h.settle();
+  const summary = h.api.summary();
+  assert.equal(summary.length, 200);
+  assert.equal(summary[0].number, 2);
+  assert.equal(summary.at(-1).number, 201);
+  assert.equal(summary.at(-1).text, 'record 201');
+  assert.equal(h.api.progress().lastNumber, 201);
+  assert.equal(await original.text(), 'late old response');
+  h.api.stop();
 });
