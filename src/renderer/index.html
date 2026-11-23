@@ -1707,6 +1707,21 @@
       </form>
     </dialog>
     <!-- #1826 (Haz's review): one schedule per chat, set from its ⋯ menu. Missed runs are skipped unless caught up. -->
+    <dialog class="plugin-dialog" id="veniceGrantDialog" aria-labelledby="veniceGrantTitle" aria-describedby="veniceGrantDescription">
+      <div class="plugin-dialog-head"><h2 id="veniceGrantTitle">Veniceによるファイルの読み取りを許可しますか？</h2></div>
+      <div class="plugin-dialog-body">
+        <p id="veniceGrantDescription">このrunでは、選択したフォルダー内のファイル内容を読み取り、Veniceへ送信できます。</p>
+        <dl><dt>対象session</dt><dd id="veniceGrantSession"></dd><dt>対象project</dt><dd id="veniceGrantProject"></dd>
+          <dt>Veniceタブ</dt><dd id="veniceGrantTab" style="overflow-wrap:anywhere"></dd>
+          <dt>許可tool</dt><dd>ファイルの読み取り（core/read）</dd></dl>
+        <details><summary>ブラウザからの指示</summary><p id="veniceGrantInstruction" style="white-space:pre-wrap;overflow-wrap:anywhere"></p></details>
+        <p><button class="btn" id="veniceGrantPick" type="button">フォルダを選ぶ</button></p>
+        <ul id="veniceGrantRoots" style="overflow-wrap:anywhere"></ul>
+        <p id="veniceGrantEmpty">読み取りを許可するフォルダーを選択してください。</p>
+        <p class="plugin-error" id="veniceGrantError" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="veniceGrantDeny" type="button">許可しない</button><button class="btn btn-solid" id="veniceGrantAllow" type="button" disabled>このrunだけ許可</button></div>
+      </div>
+    </dialog>
     <dialog class="plugin-dialog schedule-dialog" id="scheduleDialog" aria-labelledby="scheduleTitle">
       <div class="plugin-dialog-head"><h2 id="scheduleTitle">Schedule</h2><button class="btn" id="scheduleClose" type="button">Close</button></div>
       <form id="scheduleForm" class="plugin-dialog-body">

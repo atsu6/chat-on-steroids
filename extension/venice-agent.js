@@ -119,7 +119,7 @@ function callVeniceBridge(op, args = {}) {
       if (reply?.id !== id || typeof reply.ok !== 'boolean') return;
       finish(reply);
     };
-    const timer = setTimeout(() => finish({ok: false, error: `Venice bridge timed out: op=${op}`}), 45_000);
+    const timer = setTimeout(() => finish({ok: false, error: `Venice bridge timed out: op=${op}`}), (op === 'requestGrant' ? 130_000 : 45_000));
     window.addEventListener('message', onMessage);
     try {
       window.postMessage({__cosVeniceBridge: {id, op, args}}, 'https://venice.ai');
@@ -174,10 +174,12 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
   window.__cosVeniceAgent = Object.freeze({
     runTurn: __agent.runTurn, runTask: __agent.runTask, stopTask: __agent.stopTask, executeTool, TOOL_REGISTRY, buildTurn, parseAction,
     localIdentity: () => callVeniceBridge('localIdentity'),
-    setLocalRun: runId => callVeniceBridge('setLocalRun', {runId})
+    setLocalRun: runId => callVeniceBridge('setLocalRun', {runId}),
+    requestGrant: instructionSummary => callVeniceBridge('requestGrant', {instructionSummary}),
+    revokeLocal: () => callVeniceBridge('revokeLocal')
   });
   const origin = 'https://venice.ai';
-  let panelRunId = null;
+  let panelTask = null, retainedGrant = null;
   const postPanel = (id, event, payload = {}) => window.postMessage({
     type: 'cos-venice-panel-event', id, event, ...payload
   }, origin);
@@ -187,22 +189,34 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
     if (message.op === 'ready') { postPanel(null, 'ready'); return; }
     if (typeof message.id !== 'string' || !message.id) return;
     if (message.op === 'stop') {
-      if (message.id === panelRunId && window.__cosVeniceAgent.stopTask()) postPanel(message.id, 'stopping');
+      if (message.id !== panelTask?.id && message.id !== retainedGrant?.id) return;
+      if (panelTask) { panelTask.cancelled = true; window.__cosVeniceAgent.stopTask(); }
+      postPanel(message.id, 'stopping');
+      void callVeniceBridge('revokeLocal').then(() => postPanel(message.id, 'revoked'),
+        error => postPanel(message.id, 'error', {error:error.message}));
       return;
     }
     if (message.op !== 'run') return;
-    if (panelRunId) { postPanel(message.id, 'error', {error: 'タスクは既に実行中です。'}); return; }
+    if (panelTask) { postPanel(message.id, 'error', {error: 'タスクは既に実行中です。'}); return; }
     if (typeof message.instruction !== 'string' || !message.instruction.trim()) {
       postPanel(message.id, 'error', {error: '指示を入力してください。'}); return;
     }
-    panelRunId = message.id;
-    postPanel(message.id, 'started');
-    window.__cosVeniceAgent.runTask(message.instruction, {
-      maxSteps: message.maxSteps,
-      onStep: (step, preview) => postPanel(message.id, 'step', {step, preview})
-    }).then(result => postPanel(message.id, 'done', {summary: result.summary}), error => {
-      postPanel(message.id, error.code === 'VENICE_TASK_STOPPED' ? 'stopped' : 'error', {error: error.message});
-    }).finally(() => { panelRunId = null; });
+    const state = {id:message.id, cancelled:false};
+    panelTask = state;
+    postPanel(message.id, 'awaiting');
+    void (async () => {
+      const grant = await callVeniceBridge('requestGrant', {instructionSummary:message.instruction.slice(0,1000)});
+      if (state.cancelled) { await callVeniceBridge('revokeLocal'); throw Object.assign(new Error('タスクを停止しました。'),{code:'VENICE_TASK_STOPPED'}); }
+      retainedGrant = {id:message.id,runId:grant.runId};
+      postPanel(message.id, 'granted', {runId:grant.runId});
+      postPanel(message.id, 'started');
+      return window.__cosVeniceAgent.runTask(message.instruction, {
+        maxSteps: message.maxSteps,
+        onStep: (step, preview) => postPanel(message.id, 'step', {step, preview})
+      });
+    })().then(result => postPanel(message.id, 'done', {summary:result.summary}), error => {
+      postPanel(message.id, state.cancelled || error.code === 'VENICE_TASK_STOPPED' ? 'stopped' : 'error', {error:error.message});
+    }).finally(() => { if (panelTask === state) panelTask = null; });
   });
   postPanel(null, 'ready');
 }

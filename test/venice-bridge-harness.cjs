@@ -79,7 +79,15 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
   };
   vm.runInNewContext(workerSource, {
     browserId: 'a'.repeat(32), load: async () => {},
-    call: localTransport ?? (async () => { throw new Error('Unexpected local transport'); }),
+    call: async (path, ...args) => {
+      if (path === '/venice/grant/document') return {ok:true,data:{ok:true}};
+      if (localTransport) return localTransport(path, ...args);
+      return (async () => {
+      if (path === '/venice/grant/request') return {ok:true,data:{runId:'11111111-1111-4111-8111-111111111111'}};
+      if (path.startsWith('/venice/grant/')) return {ok:true,data:{revoked:true}};
+      throw new Error('Unexpected local transport');
+      })();
+    },
     chrome: api, URL, setTimeout: timers?.setTimeout ?? setTimeout, clearTimeout: timers?.clearTimeout ?? clearTimeout,
     tabOperationQueues: new Map(),
     HANDLERS: {synthetic_echo: async message => ({ok: true, result: message.value})},
@@ -117,7 +125,7 @@ function agentHarness(t, {replies = [], html = '', owned = false, localTransport
     runtimeMessages.push(clone(message));
     return h.send(message);
   }}};
-  vm.runInNewContext(read('venice-bridge.js'), {window: brain, location: brain.location, chrome: isolatedChrome});
+  vm.runInNewContext(read('venice-bridge.js'), {window: brain, crypto: brain.crypto, location: brain.location, chrome: isolatedChrome});
   brain.__cosVeniceSend = {async sendViaUi(prompt) {
     prompts.push(prompt);
     assert.ok(replies.length, 'Unexpected model turn');

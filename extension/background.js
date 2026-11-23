@@ -5763,6 +5763,27 @@ function waitForVeniceWorkTab(id) {
   });
 }
 
+// Stored document binding survives MV3 sleep; cancellation does not wait behind a tool/grant HTTP call.
+async function revokeVeniceGrant(tabId, documentId = null) {
+  const binding = await serializeTab(tabId, async () => {
+    await load();
+    const key = `cosVeniceGrant:${tabId}`, current = (await chrome.storage.session.get(key))[key];
+    if (!current || (documentId && current.documentId !== documentId)) return null;
+    await chrome.storage.session.set({[key]: {...current, cancelled: true}});
+    return current;
+  });
+  if (!binding) return false;
+  const reply = await call('/venice/grant/revoke', {method: 'POST', body: JSON.stringify({
+    sender: {tabId, documentId: binding.documentId}, ...(binding.runId ? {runId: binding.runId} : {})
+  })});
+  if (!reply.ok) throw new Error('runの失効を確認できませんでした。');
+  return Boolean(reply.data?.revoked);
+}
+chrome.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === 'loading' || change.url) void revokeVeniceGrant(id).catch(() => {});
+});
+chrome.tabs.onRemoved.addListener(id => { void revokeVeniceGrant(id).catch(() => {}); });
+
 async function handleVeniceBridge(message, sender) {
   // Never infer authority from message fields supplied by the page.
   if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) ||
@@ -5770,33 +5791,66 @@ async function handleVeniceBridge(message, sender) {
       !isVeniceBridgeUrl(sender.url)) {
     return {ok: false, error: 'Venice bridge sender is not authorized'};
   }
+  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument'].includes(message.op)) {
+    if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
+    const brain = await chrome.tabs.get(sender.tab.id);
+    if (!isVeniceBridgeUrl(brain.url) || brain.pendingUrl) throw new Error('Venice brain tab has navigated away');
+    await load();
+    const identity = {browserId, tabId: sender.tab.id, documentId: sender.documentId};
+    const source = {tabId: sender.tab.id, documentId: sender.documentId};
+    const runKey = `cosVeniceLocalRun:${sender.tab.id}:${sender.documentId}`;
+    const bindingKey = `cosVeniceGrant:${sender.tab.id}`;
+    if (message.op === 'localIdentity') return {ok: true, result: identity};
+    if (message.op === 'localDocument') {
+      const previous = (await chrome.storage.session.get(bindingKey))[bindingKey];
+      if (previous && previous.documentId !== sender.documentId) await revokeVeniceGrant(sender.tab.id, previous.documentId);
+      await call('/venice/grant/document', {method: 'POST', body: JSON.stringify({sender: source})});
+      return {ok: true, result: {ok: true}};
+    }
+    if (message.op === 'setLocalRun') {
+      if (typeof message.args?.runId !== 'string') throw new Error('runId is required');
+      await chrome.storage.session.set({[runKey]: message.args.runId});
+      return {ok: true, result: {runId: message.args.runId}};
+    }
+    if (message.op === 'revokeLocal') {
+      const revoked = await revokeVeniceGrant(sender.tab.id, sender.documentId);
+      return {ok: true, result: {revoked}};
+    }
+    if (message.op === 'requestGrant') {
+      await revokeVeniceGrant(sender.tab.id, sender.documentId);
+      const requestId = message.id;
+      await serializeTab(sender.tab.id, () => chrome.storage.session.set({[bindingKey]: {documentId: sender.documentId, requestId, cancelled: false}}));
+      const reply = await call('/venice/grant/request', {method: 'POST', timeoutMs: 125_000, body: JSON.stringify({
+        sender: source, tabUrl: sender.url, requestId, tools: ['core/read'],
+        instructionSummary: String(message.args?.instructionSummary ?? '').slice(0, 1000)
+      })});
+      const accepted = await serializeTab(sender.tab.id, async () => {
+        const binding = (await chrome.storage.session.get(bindingKey))[bindingKey];
+        if (!binding || binding.requestId !== requestId || binding.cancelled) return false;
+        if (!reply.ok || !reply.data?.runId) throw new Error(reply.data?.error || reply.error || 'アプリの承認を取得できませんでした。');
+        await chrome.storage.session.set({[runKey]: reply.data.runId, [bindingKey]: {...binding, runId: reply.data.runId}});
+        return true;
+      });
+      if (!accepted) {
+        if (reply.data?.runId) await call('/venice/grant/revoke', {method: 'POST', body: JSON.stringify({sender: source, runId: reply.data.runId})});
+        throw new Error('このrunは停止されました。');
+      }
+      return {ok: true, result: {runId: reply.data.runId}};
+    }
+    const runId = (await chrome.storage.session.get(runKey))[runKey];
+    if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
+    const args = message.args ?? {};
+    if (args.surface !== 'core' || args.tool !== 'read') throw new Error('Only core/read is available');
+    const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({sender: source,
+      request: {runId, callId: args.callId, surface: 'core', tool: 'read', args: args.args}
+    })});
+    if (!reply.ok) throw new Error(`Venice local tool transport failed: ${reply.data?.error || reply.error || reply.status}`);
+    return {ok: true, result: reply.data};
+  }
   return serializeTab(sender.tab.id, async () => {
     const brain = await chrome.tabs.get(sender.tab.id);
     if (!isVeniceBridgeUrl(brain.url) || (brain.pendingUrl && !isVeniceBridgeUrl(brain.pendingUrl))) {
       return {ok: false, error: 'Venice brain tab has navigated away'};
-    }
-    // Local tools use Chrome's sender document, never page-supplied tab/document fields.
-    if (['localIdentity', 'setLocalRun', 'localTool'].includes(message.op)) {
-      if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
-      await load();
-      const identity = {browserId, tabId: sender.tab.id, documentId: sender.documentId};
-      const runKey = `cosVeniceLocalRun:${sender.tab.id}:${sender.documentId}`;
-      if (message.op === 'localIdentity') return {ok: true, result: identity};
-      if (message.op === 'setLocalRun') {
-        if (typeof message.args?.runId !== 'string') throw new Error('runId is required');
-        await chrome.storage.session.set({[runKey]: message.args.runId});
-        return {ok: true, result: {runId: message.args.runId}};
-      }
-      const runId = (await chrome.storage.session.get(runKey))[runKey];
-      if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
-      const args = message.args ?? {};
-      if (args.surface !== 'core' || args.tool !== 'read') throw new Error('Only core/read is available');
-      const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({
-        sender: {tabId: sender.tab.id, documentId: sender.documentId},
-        request: {runId, callId: args.callId, surface: 'core', tool: 'read', args: args.args}
-      })});
-      if (!reply.ok) throw new Error(`Venice local tool transport failed: ${reply.data?.error || reply.error || reply.status}`);
-      return {ok: true, result: reply.data};
     }
     // One working tab per brain tab. Session storage survives service-worker suspension.
     const key = `cosVeniceWorkTab:${sender.tab.id}`;

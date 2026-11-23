@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import type { VeniceRunGrant, VeniceToolCallRequest, VeniceToolCallResponse } from '../shared/venice-integration.js';
+import type { VeniceRunGrant, VeniceToolCallRequest, VeniceToolCallResponse, VeniceGrantPending, VeniceGrantReply } from '../shared/venice-integration.js';
 import type { Root } from '../shared/types.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
-import { resolvePath } from './sandbox.js';
+import { resolvePath, validateNewRoot, uniqueRootName } from './sandbox.js';
 import { getSession } from './session/store.js';
 import { createRegistrar } from './mcp/kernel.js';
 import { registerCoreTools } from './mcp/tools-core.js';
@@ -25,11 +25,20 @@ const responseSchema = z.object({
 }).strict();
 const recordSchema = z.object({ request: requestSchema, sender: veniceSenderSchema, response: responseSchema });
 type CallRecord = z.infer<typeof recordSchema>;
-type Grant = { value: VeniceRunGrant; sender: VeniceSender; active: boolean };
+type Grant = { value: VeniceRunGrant; sender: VeniceSender; active: boolean; roots: Root[]; configured: boolean };
+type Approval = { id: string; key: string; sender: VeniceSender; view: VeniceGrantPending | null;
+  roots: Root[]; answering: boolean; reply: Promise<VeniceGrantReply>; finish(reply: VeniceGrantReply): void; timer: ReturnType<typeof setTimeout> };
+type ApprovalUi = {
+  context(): Promise<Pick<VeniceGrantPending, 'sessionId' | 'sessionTitle' | 'project'>>;
+  notify(pending: VeniceGrantPending[]): void;
+};
+export const veniceGrantRequestSchema = z.object({ requestId: z.string().uuid(),
+  tools: z.tuple([z.literal('core/read')]), instructionSummary: z.string().trim().min(1).max(1000) }).strict();
 type Dependencies = {
   load(): Promise<unknown>;
   save(records: CallRecord[]): Promise<void>;
-  execute(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean): Promise<unknown>;
+  execute(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots?: Root[]): Promise<unknown>;
+  saveGrants?(grants: unknown[]): Promise<void>;
 };
 const refusal = (callId: string, error: string): VeniceToolCallResponse => ({ callId, state: 'unknown', error });
 
@@ -41,6 +50,85 @@ export class VeniceToolGateway {
   private ready: Promise<void> | null = null;
   private saves: Promise<void> = Promise.resolve();
   private stopped = false;
+  private approvalUi: ApprovalUi | null = null;
+  private approvals = new Map<string, Approval>();
+  private grantSaves: Promise<void> = Promise.resolve();
+
+  setApprovalUi(ui: ApprovalUi): void { this.approvalUi = ui; }
+  pendingApprovals(): VeniceGrantPending[] {
+    return structuredClone([...this.approvals.values()].flatMap(row => row.view ? [row.view] : []));
+  }
+  private publishApprovals(): void { this.approvalUi?.notify(this.pendingApprovals()); }
+  private finishApproval(row: Approval, reply: VeniceGrantReply): void {
+    if (!this.approvals.delete(row.id)) return;
+    clearTimeout(row.timer); row.finish(reply); this.publishApprovals();
+  }
+  requestGrant(input: unknown, source: unknown, tabUrl: string): Promise<VeniceGrantReply> {
+    const request = veniceGrantRequestSchema.parse(input), sender = veniceSenderSchema.parse(source);
+    const url = new URL(tabUrl);
+    if (url.origin !== 'https://venice.ai') throw new Error('venice_invalid_tab');
+    for (const row of this.approvals.values()) {
+      if (!isDeepStrictEqual(row.sender, sender)) continue;
+      return row.key === request.requestId ? row.reply : Promise.resolve({ error: '承認待ちの要求がすでにあります。' });
+    }
+    if (this.stopped || !this.approvalUi || this.approvals.size >= 8) return Promise.resolve({ error: 'アプリで承認画面を開けません。' });
+    let finish!: (reply: VeniceGrantReply) => void;
+    const reply = new Promise<VeniceGrantReply>(resolve => { finish = resolve; });
+    const row: Approval = { id: randomUUID(), key: request.requestId, sender, view: null, roots: [], answering: false,
+      reply, finish, timer: setTimeout(() => this.finishApproval(row, { error: '承認待ちが時間切れになりました。' }), 120_000) };
+    row.timer.unref?.();
+    this.approvals.set(row.id, row);
+    void this.approvalUi.context().then(context => {
+      if (!this.approvals.has(row.id)) return;
+      row.view = { ...context, id: row.id, tab: { id: sender.tabId, url: url.href },
+        tools: ['core/read'], instructionSummary: request.instructionSummary, roots: [] };
+      this.publishApprovals();
+    }).catch(() => this.finishApproval(row, { error: '対象のローカルsessionを用意できません。' }));
+    return reply;
+  }
+  async chooseApprovalRoots(id: string, paths: string[]): Promise<VeniceGrantPending[]> {
+    const row = this.approvals.get(id);
+    if (!row?.view || row.answering) throw new Error('venice_approval_unavailable');
+    const roots = [...row.roots];
+    for (const selected of paths) {
+      const real = await validateNewRoot(selected, []);
+      if (!roots.some(root => root.path === real)) roots.push({ name: uniqueRootName(real, roots), path: real });
+    }
+    if (roots.length > 16) throw new Error('venice_too_many_folders');
+    if (this.approvals.get(id) !== row || row.answering) throw new Error('venice_approval_unavailable');
+    row.roots = roots; row.view.roots = roots.map(root => root.path);
+    this.publishApprovals(); return this.pendingApprovals();
+  }
+  async answerApproval(id: string, allow: boolean): Promise<void> {
+    const row = this.approvals.get(id);
+    if (!row?.view || row.answering) throw new Error('venice_approval_unavailable');
+    if (!allow) { this.finishApproval(row, { error: 'ファイルの読み取りを許可しませんでした。' }); return; }
+    if (!row.roots.length) throw new Error('venice_folder_required');
+    row.answering = true;
+    try {
+      for (const root of row.roots) {
+        if (await validateNewRoot(root.path, []) !== root.path) throw new Error('venice_folder_changed');
+      }
+      if (!this.approvals.has(id)) throw new Error('venice_approval_unavailable');
+      const grant = await this.grantWithRoots(row.view.sessionId, row.roots, row.sender, false);
+      if (!this.approvals.has(id)) { this.revoke(grant.runId); return; }
+      this.finishApproval(row, { runId: grant.runId });
+    } finally { row.answering = false; }
+  }
+  revokeSender(source: VeniceSender, runId?: string): boolean {
+    let revoked = false;
+    for (const [id, grant] of this.grants) if ((!runId || id === runId) && isDeepStrictEqual(grant.sender, source)) revoked = this.revoke(id) || revoked;
+    for (const row of [...this.approvals.values()]) if (isDeepStrictEqual(row.sender, source)) this.finishApproval(row, { error: 'このrunは停止されました。' });
+    return revoked;
+  }
+  documentChanged(source: VeniceSender): void {
+    for (const grant of this.grants.values()) if (grant.sender.browserId === source.browserId && grant.sender.tabId === source.tabId && grant.sender.documentId !== source.documentId) this.revokeSender(grant.sender);
+    for (const row of [...this.approvals.values()]) if (row.sender.browserId === source.browserId && row.sender.tabId === source.tabId && row.sender.documentId !== source.documentId) this.revokeSender(row.sender);
+  }
+  private saveGrants(): Promise<void> {
+    const next = this.grantSaves.then(() => this.deps.saveGrants?.(structuredClone([...this.grants.values()])));
+    this.grantSaves = next.catch(() => undefined); return next;
+  }
   constructor(private deps: Dependencies) {}
 
   initialize(): Promise<void> {
@@ -71,9 +159,20 @@ export class VeniceToolGateway {
       approved.push(resolved.root.path);
     }
     if (!approved.length || this.stopped || this.grants.size >= 32) throw new Error('VENICE_GRANT_UNAVAILABLE');
-    const value: VeniceRunGrant = { runId: randomUUID(), sessionId, roots: [...new Set(approved)],
+    return this.grantWithRoots(sessionId, config.roots.filter(root => approved.includes(root.path)), sender, true);
+  }
+
+  private async grantWithRoots(sessionId: string, roots: Root[], sender: VeniceSender, configured: boolean): Promise<VeniceRunGrant> {
+    await this.initialize();
+    const session = await getSession(sessionId);
+    if (!session || session.conversationId || session.endedAt || this.stopped || this.grants.size >= 32) throw new Error('venice_grant_unavailable');
+    const value: VeniceRunGrant = { runId: randomUUID(), sessionId, roots: roots.map(root => root.path),
       tabId: sender.tabId, documentId: sender.documentId, tools: ['core/read'] };
-    this.grants.set(value.runId, { value, sender: veniceSenderSchema.parse(sender), active: true });
+    const grant: Grant = { value, sender: veniceSenderSchema.parse(sender), active: true, roots: structuredClone(roots), configured };
+    this.grants.set(value.runId, grant);
+    try { await this.saveGrants(); }
+    catch { grant.active = false; throw new Error('venice_grant_not_durable'); }
+    if (!grant.active || this.stopped) throw new Error('venice_run_revoked');
     return structuredClone(value);
   }
 
@@ -81,13 +180,17 @@ export class VeniceToolGateway {
     const grant = this.grants.get(runId);
     if (!grant) return false;
     grant.active = false;
+    void this.saveGrants().catch(() => undefined);
     return true;
   }
-  revokeAll(): void { for (const grant of this.grants.values()) grant.active = false; }
+  revokeAll(): void {
+    for (const [id] of this.grants) this.revoke(id);
+    for (const row of [...this.approvals.values()]) this.finishApproval(row, { error: 'アプリとの接続が終了しました。' });
+  }
   async stop(): Promise<void> {
     this.stopped = true; this.revokeAll();
     await Promise.allSettled([...this.reservations.values()].map(row => row.reply));
-    await this.saves;
+    await this.saves; await this.grantSaves;
   }
 
   /** Reserve synchronously, before initialize, persistence or the handler can await. */
@@ -117,7 +220,8 @@ export class VeniceToolGateway {
       ? old.response : refusal(request.callId, 'CALL_ID_CONFLICT');
     const grant = this.grants.get(request.runId);
     if (!grant || !isDeepStrictEqual(grant.sender, sender)) return refusal(request.callId, 'RUN_NOT_AUTHORIZED');
-    const current = () => !this.stopped && grant.active;
+    const current = () => !this.stopped && grant.active && (!grant.configured ||
+      grant.roots.every(root => getConfig().roots.some(live => !live.remote && live.path === root.path && live.name === root.name)));
     if (!current()) return refusal(request.callId, 'RUN_REVOKED');
     if (request.surface !== 'core' || request.tool !== 'read' || !grant.value.tools.includes('core/read')) return refusal(request.callId, 'TOOL_NOT_GRANTED');
     if (this.records.size >= 256) return refusal(request.callId, 'VENICE_LEDGER_FULL');
@@ -129,7 +233,7 @@ export class VeniceToolGateway {
     try {
       if (!current()) row.response = { callId: request.callId, state: 'completed', error: 'RUN_REVOKED' };
       else {
-        result = await this.deps.execute(request, grant.value, current);
+        result = await this.deps.execute(request, grant.value, current, grant.roots);
         // Keep bounded JSON, not an unbounded image batch, in the first text-only ledger.
         row.response = Buffer.byteLength(JSON.stringify(result) ?? '') > 1_000_000
           ? { callId: request.callId, state: 'completed', error: 'RESULT_TOO_LARGE' }
@@ -143,22 +247,19 @@ export class VeniceToolGateway {
 }
 
 /** Build a fresh live registrar for each call; no MCP URL, fake request proof or nested parent. */
-async function executeRead(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean): Promise<unknown> {
+async function executeRead(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots: Root[] = []): Promise<unknown> {
   const config = getConfig();
-  const roots: Root[] = config.roots.filter(root => !root.remote && grant.roots.includes(root.path));
-  if (roots.length !== grant.roots.length) throw new Error('RUN_ROOT_REVOKED');
   const caps = effectiveCapabilities(config);
   // This stage is text-only and does not expose unrelated metadata/browse/command tools.
   const reg = createRegistrar(null, { roots, caps, exposedCaps: { ...caps, read: true }, readOnly: config.readOnly,
     sessionTools: false, agentTools: false }, 'core');
   registerCoreTools(reg);
-  const live = () => current() &&
-    roots.every(approved => getConfig().roots.some(root => !root.remote && approved.path === root.path && approved.name === root.name));
   return reg.invokeHostAdmitted(request.tool, request.args, { type: 'venice', runId: grant.runId,
-    sessionId: grant.sessionId, roots, current: live });
+    sessionId: grant.sessionId, roots, current });
 }
 
 export const veniceToolGateway = new VeniceToolGateway({
   load: () => readDurable('venice-tools', { strict: true }),
-  save: rows => writeDurableNow('venice-tools', rows), execute: executeRead
+  save: rows => writeDurableNow('venice-tools', rows), execute: executeRead,
+  saveGrants: rows => writeDurableNow('venice-grants', rows)
 });

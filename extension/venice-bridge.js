@@ -3,6 +3,7 @@
   'use strict';
   const ORIGIN = 'https://venice.ai';
   if (location.origin !== ORIGIN) return;
+  void chrome.runtime.sendMessage({type:'cos-venice-bridge', id:crypto.randomUUID(), op:'localDocument'}).catch(() => {});
   window.addEventListener('message', async event => {
     if (event.source !== window || event.origin !== ORIGIN) return;
     const request = event.data?.__cosVeniceBridge;
