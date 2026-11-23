@@ -46,7 +46,12 @@
    自動リトライはしない。警告が出た場合は送信を止める。
 10. Console で `window.__cosVeniceRecon.status()` を確認する。
     `requests` は記録候補の件数で、チャット送信数とは限らない。
-    `readingBodies: 0` なら現在の複製ストリームの読み取りは終わっている。
+    `window.__cosVeniceRecon.progress()` では本文を出さずに
+    `{ recording, requests, lastNumber, lastBodyComplete, lastStatus }` を確認できる。
+    記録がなければ `lastNumber: 0`、`lastBodyComplete: false`、`lastStatus: null`。
+    `lastBodyComplete: true` は最後の複製本文が最後まで読めたことを示し、HTTP成功とは別なので
+    `lastStatus` も確認する。`readingBodies: 0` なら現在の全複製ストリームの読み取りは終わっている。
+    2回目を待つ場合は送信直前より `lastNumber` が増えたことも確認し、1回目の完了を使い回さない。
     続いたままなら少し待ち、それでも終わらない場合は次の保存で部分記録として残す。
 11. 次を実行する。記録を停止し、JSON のブラウザダウンロードを開始する。
 

@@ -151,6 +151,12 @@
     return { installed, recording: Boolean(session?.recording), requests: session?.records.length ?? 0,
       readingBodies: session?.readers.size ?? 0, limitReached: session?.records.length === MAX_REQUESTS };
   }
+  function progress() {
+    const last = session?.records.at(-1);
+    return { recording: Boolean(session?.recording), requests: session?.records.length ?? 0,
+      lastNumber: last?.number ?? 0, lastBodyComplete: last?.response?.body?.complete === true,
+      lastStatus: last?.response?.status ?? null };
+  }
   function start() {
     if (!installed) throw new Error('usage.js の Venice トレースが未注入です。ページを再読み込みしてください。');
     if (session?.recording) throw new Error('既に記録中です。先に save() または stop() を実行してください。');
@@ -191,5 +197,5 @@
     setTimeout(() => URL.revokeObjectURL(blobURL), 60_000);
     return { filename, requests: session.records.length, savedBy: 'browser-download' };
   }
-  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status });
+  window.__cosVeniceRecon = Object.freeze({ install, start, stop, save, status, progress });
 })();

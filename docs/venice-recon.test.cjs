@@ -52,6 +52,47 @@ function harness(fetch, origin = 'https://venice.ai') {
   };
 }
 
+test('progress reports only scalar completion metadata for empty and pending records', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const h = harness(() => pending);
+  const empty = { recording: false, requests: 0, lastNumber: 0, lastBodyComplete: false, lastStatus: null };
+  assert.deepEqual({ ...h.api.progress() }, empty);
+  h.api.start();
+  assert.deepEqual({ ...h.api.progress() }, { ...empty, recording: true });
+  h.window.fetch('/unknown', { method: 'POST', headers: { Authorization: 'Bearer synthetic-progress-secret' }, body: 'private fixture text' });
+  assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 1, lastNumber: 1, lastBodyComplete: false, lastStatus: null });
+  resolve(new Response('private fixture response'));
+  await h.settle();
+  const snapshot = h.api.progress();
+  assert.deepEqual({ ...snapshot }, { recording: true, requests: 1, lastNumber: 1, lastBodyComplete: true, lastStatus: 200 });
+  assert.ok(Object.values(snapshot).every(value => typeof value === 'boolean' || typeof value === 'number' || value === null));
+  snapshot.lastNumber = 99;
+  assert.equal(h.api.progress().lastNumber, 1);
+  h.api.stop();
+  assert.equal(h.api.progress().recording, false);
+  assert.equal(h.api.progress().lastNumber, 1);
+  h.api.start();
+  assert.deepEqual({ ...h.api.progress() }, { ...empty, recording: true });
+});
+
+test('progress distinguishes an open response body from a completed body and follows the latest record', async () => {
+  let controller;
+  let calls = 0;
+  const response = new Response(new ReadableStream({ start(value) { controller = value; } }),
+    { headers: { 'content-type': 'text/event-stream' } });
+  const h = harness(() => Promise.resolve(++calls === 1 ? response : new Response('rate limited', { status: 429 })));
+  h.api.start();
+  await h.window.fetch('/unknown', { method: 'POST' });
+  assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 1, lastNumber: 1, lastBodyComplete: false, lastStatus: 200 });
+  controller.close();
+  await h.settle();
+  assert.equal(h.api.progress().lastBodyComplete, true);
+  await h.window.fetch('/unknown', { method: 'POST' });
+  await h.settle();
+  assert.deepEqual({ ...h.api.progress() }, { recording: true, requests: 2, lastNumber: 2, lastBodyComplete: true, lastStatus: 429 });
+});
+
 test('manual opt-in preserves the exact native promise, arguments and SSE body', async () => {
   const sse = 'event: synthetic\ndata: {"opaque":"fixture"}\n\ndata: [DONE]\n\n';
   const response = new Response(sse, { headers: { 'Content-Type': 'text/event-stream' } });
