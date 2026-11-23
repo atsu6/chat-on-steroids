@@ -280,11 +280,12 @@ test('Venice injection is host-scoped, with unchanged ChatGPT content-script ent
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'extension/manifest.json'), 'utf8'));
   assert.ok(manifest.host_permissions.includes('https://venice.ai/*'));
   const venice = manifest.content_scripts.filter(entry => entry.matches.includes('https://venice.ai/*'));
-  assert.equal(venice.length, 2);
+  assert.equal(venice.length, 3);
   assert.equal(venice[0].world, 'MAIN');
   assert.equal(venice[0].run_at, 'document_start');
   assert.deepEqual(venice[0].js, ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'venice-agent.js', 'usage.js']);
   assert.deepEqual(venice[1], {matches: ['https://venice.ai/*'], js: ['venice-bridge.js'], world: 'ISOLATED', run_at: 'document_start'});
+  assert.deepEqual(venice[2], {matches: ['https://venice.ai/*'], js: ['venice-panel.js'], world: 'ISOLATED', run_at: 'document_start'});
   const chatgpt = manifest.content_scripts.filter(entry => entry.matches.includes('https://chatgpt.com/*'));
   assert.deepEqual(chatgpt, [
     { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],

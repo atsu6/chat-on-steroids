@@ -908,3 +908,46 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 ### 次に確認したいこと
 
 - 今回の成功記録に伴う追加確認はなし。findingsの追記をローカルcommitし、送信・pushは行わない。
+
+## 2026-11-24 — 脳タブのShadow DOM操作パネル（実Veniceへの送信なし）
+
+### 分かったこと
+
+- venice-panel.jsをVenice限定のISOLATED / document_startへ登録した。body準備後に右下へ表示し、
+  指示・実行・最大ステップ数（既定10、上限40）・ステップログ・停止・畳む/開くをShadow DOM内に実装した。
+  読み込みだけでは実行しない。Electron側と既存background処理は変更していない。
+- 見た目は既存extension/popup.cssのグレー基調、青の操作色、ライト/ダークの役割を継承した。
+  小さな作業用パネルとして日本語システムフォント、明確なフォーカス、モバイルの44px操作領域、
+  横スクロールできる1行ログを採用した。方向は既存拡張を主参照とし、Refero同梱のフォーム/タイポグラフィ資料と
+  Emilの操作フィードバック指針を補助にした。ページ側の強いCSSを入れた合成ページでも分離を確認した。
+- MAINとISOLATED間は固定typeのpostMessageを使い、同じwindow・https://venice.aiのoriginを両側で検査する。
+  MAINがwindow.__cosVeniceAgent.runTaskを呼ぶ。実行idで進捗・停止を対応付け、別idの停止は無視する。
+- runTaskに任意のonStepを追加した。完了したtool / doneごとに第1引数 `{index, name, ok}`、
+  第2引数で結果の先頭60文字を渡す。既存の戻り値とstepsの形は維持した。
+  パネルは結果をtextContentで表示し、結果に含まれるHTMLは実行しない。
+- stopTaskはフラグをfalseにし、次の処理の前で停止する。進行中の送信やツールは中断しない。
+  送信中に停止した場合は応答を待ち、その応答のツールやJSON再出力を始めずに停止する。
+  停止時はVENICE_TASK_STOPPEDと完了済みstepsを残し、再実行できる。
+  パネルは停止要求の送出とMAINの受付を「停止要求中 / 停止待ち」で区別する。
+- 変更した実装2ファイル、合成テスト/画面検証2ファイル、manifest検証を更新した既存テストの
+  node --checkが成功した。対象の合成テストは計100件成功した。
+  onStep全ステップ通知、停止後の次ターン抑止、送信/ツール完了待ち、JSON再出力抑止、再実行、
+  進捗・上限エラー・折り畳み・送信元検査・document_startの初期化を確認した。
+- 既存のホスト側PlaywrightとGoogle Chromeで合成ページを表示し、CDPでMAINと実際のISOLATED worldを分けた。
+  ISOLATEDからMAINのagentがundefinedである構成でも、実行・進捗・停止・折り畳みが動作した。
+  PC 1280px/ライト、モバイル390px/ダークを描画して目視確認し、横はみ出し・ページ例外なし。
+  axe検査の指摘を修正して違反0件となった。再現用はtest/venice-panel.visual.cjs、画面は
+  docs/screenshots/venice-panel-desktop.png / venice-panel-mobile.png。
+- 実Veniceへの送信は0回。ヘッドレスChromeのページ要求はローカル応答または遮断に置き換え、
+  モデル応答も合成値を使った。サインイン済みタブは操作していない。新しいcapture / record番号はない。
+  上記の根拠は合成テストと合成ページの描画であり、実通信recordではない。
+
+### 不明なこと
+
+- 実Veniceページ上でのパネル表示と、パネルからの実モデル実行は未検証。
+- 既知のprivate endpointの403原因、規約解釈、認証等の不明点は未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 使用時は拡張機能とVeniceタブを再読み込みしてパネルを表示する。
+  今回は合成検証・描画確認・ローカルcommitまでで停止し、実送信・pushはしない。
