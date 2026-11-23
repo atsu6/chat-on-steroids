@@ -239,3 +239,281 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - アダプタ実装へ進む場合は、この実測を入力にする。認証方式などの不明点は不明のまま引き継ぐ。
   今回は再送、API直叩き、自動ループ、アダプタ本体には進まず、指定のコミットで停止する。
+
+## 2026-11-23 — fixture #2 / #3 に基づく送信実装
+
+### 分かったこと：本文の構造と共通・可変部分
+
+根拠: `fixtures/venice-capture-2026-11-23T13-15-07-891Z.json` の #2 / #3。
+#2 の `request.body.text` を JSON としてそのまま写す（整形のみ）。
+
+```json
+{
+  "clientTools": [
+    {
+      "description": "Asks the user to approve spending credits on paid usage. Venice calls this itself; never call it.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "approve_paid_usage"
+    },
+    {
+      "description": "Edit a video from the conversation and produce a new video. Provide the source video's media_id and an     ordered list of operations. Supported operations: trim (keep a time range), add_audio (add or replace the     audio track using another media_id, optionally mixing), concat (append other clips), set_volume (scale or     mute the existing audio; 0 mutes), speed (change playback speed), and resize (change dimensions). The edited     video is rendered before the tool returns, and the result includes the media_id of the finished video, which     you can pass as source_media_id to run further edits on the result. If an edit fails, do not retry     automatically. Instead, inform the user that the edit failed and explain the reason. Only retry if the user     explicitly asks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operations": {
+            "description": "Ordered list of edit operations applied to the source video.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "trim"
+                    },
+                    "end_seconds": {
+                      "description": "End of the kept range, in seconds.",
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "start_seconds": {
+                      "description": "Start of the kept range, in seconds.",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "end_seconds",
+                    "op",
+                    "start_seconds"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "add_audio"
+                    },
+                    "source_media_id": {
+                      "description": "media_id of the audio (or video) providing the new audio.",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mode": {
+                      "description": "'replace' swaps the video's audio for the new track; 'mix' overlays it. Defaults to 'replace'.",
+                      "type": "string",
+                      "enum": [
+                        "mix",
+                        "replace"
+                      ]
+                    },
+                    "volume": {
+                      "description": "Volume multiplier for the added audio (1 = unchanged).",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "source_media_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "concat"
+                    },
+                    "source_media_ids": {
+                      "description": "media_ids of clips to append after the source video, in order.",
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "source_media_ids"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_volume"
+                    },
+                    "factor": {
+                      "description": "Volume multiplier applied to the existing audio (0 = mute).",
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "factor",
+                    "op"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "speed"
+                    },
+                    "factor": {
+                      "description": "Playback speed multiplier (>1 speeds up, <1 slows down).",
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "factor",
+                    "op"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "resize"
+                    },
+                    "height": {
+                      "description": "Target height in pixels.",
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "width": {
+                      "description": "Target width in pixels.",
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fit": {
+                      "description": "Fit algorithm. Defaults to 'contain'.",
+                      "type": "string",
+                      "enum": [
+                        "contain",
+                        "cover",
+                        "fill"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "height",
+                    "op",
+                    "width"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "source_media_id": {
+            "description": "media_id of the source video to edit.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "operations",
+          "source_media_id"
+        ],
+        "additionalProperties": false
+      },
+      "name": "edit_video"
+    }
+  ],
+  "input": {
+    "messages": [
+      {
+        "content": [
+          {
+            "annotations": [],
+            "text": "この通信テストでは「青い伞」とだけ答えてください。",
+            "type": "output_text"
+          }
+        ],
+        "id": "G0QBYAX4DyU7-Y",
+        "role": "user",
+        "status": "completed",
+        "type": "message"
+      }
+    ]
+  }
+}
+```
+
+- トップレベルのキーは `clientTools` と `input` の2つ。`input` のキーは `messages` だけ。#3 でも同じ。
+- `clientTools` の2要素は #2 / #3 で全フィールドが同一。この観測範囲の固定テンプレートとして複製する。
+  全モデル・全機能で固定かどうかは不明。ツール定義はデータとして送るだけで、こちらから実行しない。
+- 可変部分は `input.messages`。#2 は1件、#3 は4件。#2 の user message は #3 の先頭にもそのまま入る。
+  新しい user message は text と id が異なる。履歴には user / reasoning / assistant の形があるので、sender は正規化せず丸ごと渡す。
+- URL の3つのクエリ値は #2 / #3 で同一。sender では依頼どおり `agentModelId` だけを model 引数で置換する。
+  本文に model キーは追加しない。
+- #2 / #3 の保存された `request.headers` は空。本文は JSON なので、今回の送信では標準ヘッダ
+  `Content-Type: application/json` だけを明示する。これは本文から決めた送信方針であり、見えていない元通信のヘッダを復元した値ではない。
+  Authorization と独自ヘッダは加えず、`credentials: include` を使う。401等が返っても認証値の追加や再試行はしない。
+
+### 単発senderの実装と実通信の結果
+
+- `extension/venice-send.js` に `window.__cosVeniceSend.sendTurn(messages, model)` を追加した。
+  #2 の本文テンプレートを複製し、`input.messages` だけを引数で置換する。
+  URLは #2 と同じで `agentModelId` だけを model 引数にする。
+  fetch の Promise と元の Response をそのまま返し、応答のパース・自動再送・認証補完は行わない。
+- 新しいsenderを manifest へ常時登録していない。既存の Venice タブへ Console 相当の MAIN 評価で読み込み、
+  明示的な関数呼び出しで1回だけ送信した。タブの再読み込みはしていない。
+- 送った `messages` は role: user の1件。#2 と同じ content / annotations / type / status の形を使い、
+  text は `この通信テストでは「赤い椅子」とだけ答えてください。`。
+  id は既存値を再利用せず、ローカルで新規に生成した14文字の不透明な値を使った。
+  サーバ側のID生成・検証規則そのものは不明。
+- **HTTP 200 ではなく HTTP 403** が返った。Response はsenderから返された時点で `bodyUsed: false`。
+  Content-Type は `application/json; charset=utf-8`。エラー文は次のとおり。
+
+  > Programmatic use of this API is forbidden by TOS. Continued attempted use will result in suspension of service.
+
+  続きは Venice の programmatic API のドキュメントを参照するよう案内していた。
+  追加送信、Authorization追加、独自ヘッダ追加、Content-Type変更による再試行は行っていない。
+- この実測は `fixtures/venice-capture-2026-11-23T13-27-41-319Z.json` の **#1**。
+  #1 の実際の送信本文を元の #2 と比較し、`input.messages` 以外が完全一致することを確認した。
+  送信URLも元の #2 と同じ。記録されたヘッダは `content-type: application/json` のみで、
+  `credentials: include`、本文は user 1件だった。
+- 新しいcaptureは3件で、#1がチャット送信403、#2と#3は補助通信200。
+  `progress().lastStatus: 200` は末尾の補助通信の値であり、チャットの成功を意味しない。
+  `save()` 後は `recording: false, requests: 3, readingBodies: 0`、
+  `lastNumber: 3, lastBodyComplete: true, lastStatus: 200`。追加captureも Git 除外のままローカル保持した。
+- sender の合成テスト6件（401 / 403をそのまま返すことを含む）と構文検査が成功した。
+  ローカルfixtureとの等価性確認も成功した。合成テストは private fixture なしで実行できる。
+
+### 不明なこと
+
+- HTTP 200 が返る条件は未確認。今回の拒否は401ではなく、明示的な403の規約警告だった。
+  元fixtureの #2 / #3 の request.headers は空で、Authorizationを付ける根拠にはならない。
+  今回の結果から Authorization の必要性や、追加すれば成功することは推測しない。
+- 403の本文はJSONエラーで、SSEではなかった。この送信について先頭20行のSSEや
+  `output_index: 0 / 1` の本文位置は検証できていない。
+  元fixture #2 / #3での「0がreasoning、1がassistant message」という観測は前回分の結果として区別する。
+- Content-Typeを明示しなかった場合や、別の認証条件での挙動は調べていない。再試行しない。
+
+### 次に確認したいこと
+
+- 実際の規約警告が出たので、ADRの再検討条件は成立した。private endpointのreplayは停止する。
+  API移行など次の方針はユーザーの判断を待ち、このタスクでは移行・追加送信を行わない。
+- 指定の `venice: replay sender` コミットで結果を記録して停止する。pushはしない。
