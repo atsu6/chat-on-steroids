@@ -8,6 +8,10 @@ const vm = require('node:vm');
 test('real capture #2 produces exactly 青い伞 without mixing in reasoning', t => {
   const root = path.resolve(__dirname, '..');
   const file = path.join(root, 'fixtures/venice-capture-2026-11-23T13-15-07-891Z.json');
+  if (!fs.existsSync(file)) {
+    t.skip('Private Venice capture is not available');
+    return;
+  }
   const capture = JSON.parse(fs.readFileSync(file, 'utf8'));
   const record = capture.records.find(row => row.number === 2);
   assert.equal(record.response.body.complete, true);

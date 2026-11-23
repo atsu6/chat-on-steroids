@@ -44,7 +44,7 @@
   "content_scripts": [
     {
       "matches": ["https://venice.ai/*"],
-      "js": ["venice-recon.js", "usage.js"],
+      "js": ["venice-recon.js", "venice-sse.js", "venice-send.js", "usage.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },

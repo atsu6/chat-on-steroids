@@ -283,7 +283,7 @@ test('Venice injection is host-scoped, with unchanged ChatGPT content-script ent
   assert.equal(venice.length, 1);
   assert.equal(venice[0].world, 'MAIN');
   assert.equal(venice[0].run_at, 'document_start');
-  assert.deepEqual(venice[0].js, ['venice-recon.js', 'usage.js']);
+  assert.deepEqual(venice[0].js, ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'usage.js']);
   const chatgpt = manifest.content_scripts.filter(entry => entry.matches.includes('https://chatgpt.com/*'));
   assert.deepEqual(chatgpt, [
     { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
@@ -291,4 +291,63 @@ test('Venice injection is host-scoped, with unchanged ChatGPT content-script ent
     { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], js: ['fiber.js'], world: 'MAIN', run_at: 'document_idle' },
     { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], js: ['usage.js'], world: 'MAIN', run_at: 'document_start' }
   ]);
+});
+
+test('chatProgress ignores helper requests and reports only the latest chat record', async () => {
+  let calls = 0;
+  const h = harness(() => Promise.resolve(new Response('synthetic', { status: ++calls === 2 ? 403 : 200 })));
+  const empty = { lastChatNumber: 0, lastChatBodyComplete: false, lastChatStatus: null };
+  assert.deepEqual({ ...h.api.chatProgress() }, empty);
+  h.api.start();
+  await h.window.fetch('/helper', { method: 'POST' });
+  await h.settle();
+  assert.deepEqual({ ...h.api.chatProgress() }, empty);
+  await h.window.fetch('/api/inference/chat/agents/venice', { method: 'POST' });
+  await h.settle();
+  const expected = { lastChatNumber: 2, lastChatBodyComplete: true, lastChatStatus: 403 };
+  assert.deepEqual({ ...h.api.chatProgress() }, expected);
+  await h.window.fetch('/helper', { method: 'POST' });
+  await h.settle();
+  assert.equal(h.api.progress().lastStatus, 200);
+  assert.deepEqual({ ...h.api.chatProgress() }, expected);
+  h.api.stop(); h.api.start();
+  assert.deepEqual({ ...h.api.chatProgress() }, empty);
+});
+
+test('follow delivers live raw POST chat SSE deltas with record numbers and unsubscribes', async () => {
+  let controller;
+  const stream = new Response(new ReadableStream({ start(value) { controller = value; } }),
+    { headers: { 'content-type': 'text/event-stream' } });
+  const sse = 'event: synthetic\ndata: {"text":"青い傘"}\n\n';
+  const h = harness(url => Promise.resolve(String(url).endsWith('/stream') ? stream : new Response(sse, {
+    headers: { 'content-type': String(url).includes('json') ? 'application/json' : 'text/event-stream' }
+  })));
+  const chunks = [];
+  assert.throws(() => h.api.follow(null), /callback must be a function/);
+  const stopBroken = h.api.follow(() => { throw new Error('synthetic subscriber failure'); });
+  const unsubscribe = h.api.follow((text, number) => chunks.push({ text, number }));
+  h.api.start();
+  await h.window.fetch('/helper', { method: 'POST' });
+  await h.window.fetch('/api/inference/chat/get');
+  await h.window.fetch('/api/inference/chat/json', { method: 'POST' });
+  await h.settle();
+  assert.deepEqual(chunks, []);
+  const original = await h.window.fetch('/api/inference/chat/stream', { method: 'POST', body: 'not response text' });
+  const bytes = new TextEncoder().encode(sse);
+  const split = new TextEncoder().encode('event: synthetic\ndata: {"text":"').length + 1;
+  controller.enqueue(bytes.subarray(0, split));
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(chunks.length, 1); // Delivered before response EOF, including a split UTF-8 character.
+  assert.equal(h.api.chatProgress().lastChatBodyComplete, false);
+  controller.enqueue(bytes.subarray(split));
+  controller.close();
+  await h.settle();
+  assert.equal(chunks.map(row => row.text).join(''), sse);
+  assert.ok(chunks.every(row => row.number === 4));
+  assert.equal(await original.text(), sse);
+  const count = chunks.length;
+  unsubscribe(); stopBroken();
+  await h.window.fetch('/api/inference/chat/next', { method: 'POST' });
+  await h.settle();
+  assert.equal(chunks.length, count);
 });
