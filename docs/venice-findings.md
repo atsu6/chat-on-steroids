@@ -1109,3 +1109,55 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - read接続の確認は完了。使用手順・一時IPC・sender指定・失効と現在の制限は統合計画§10を参照する。
 - 全体verifyの既存3件を解消する作業は別途扱う。今回のcommitにはread接続と関連テスト・文書だけを含める。
+
+## 2026-11-24 — モデル経由のcore/read E2E
+
+### 分かったこと
+
+- `/Users/atsu/chat-on-venice` でpwdと直近3 commitを確認した。開始HEADは `dc684ae0`、
+  続く履歴は `13f9929a` / `00ce8fb2`。8766の既存開発アプリを再起動せずに使った。
+- `/tmp/venice-e2e/note.txt` を新規作成し、UTF-8で「青い傘と赤い椅子」と改行を保存した（25 bytes）。
+  アプリの既存フォルダー承認UIからこのディレクトリだけを追加した。
+  macOSのcanonical pathは `/private/tmp/venice-e2e`、named rootは `/venice-e2e`。
+- 通常ChromeのVeniceタブは最初は旧拡張で、localIdentity/core/readが未ロードだった。
+  ユーザーが開発拡張を再読み込みし、対象タブの更新後に両関数の存在を確認した。
+  Electron DevToolsの貼り付け保護もユーザーが解除した。
+- Chrome MessageSenderの実browser/tab/documentをlocalIdentityから取得し、Electron Consoleの
+  `api.debugVeniceGrant` で上記rootだけ・core/readだけのgrantを発行した。
+  appが返したrunIdを同じタブのsetLocalRunに設定した。認証情報・run/session/document IDはcommitしない。
+- VeniceタブのConsoleからrunTaskを1回だけ呼んだ。指示は
+  「/tmp/venice-e2e/note.txt を read して、書かれている内容だけを報告してください。」、maxStepsは5。
+  本文や期待する回答は指示に含めず、ツールの代行呼び出しや合成モデル応答は使わなかった。
+- 2026-11-24 01:46:56–01:47:02 JSTに成功した。返り値は次のとおり。
+
+  ```json
+  {"summary":"青い傘と赤い椅子","steps":[{"name":"core/read","ok":true},{"name":"done","ok":true}]}
+  ```
+
+- 根拠の通信recordは、このタブの今回のrecon記録 #1 / #2。どちらもUI自身が送ったPOSTでHTTP 200、
+  response.completedまで取得した。#1のモデル応答はcore/readと `paths:["/tmp/venice-e2e/note.txt"]`、
+  #2は上記done。SSE内model_idは `deepseek-v4-1-flash-uncensored`。
+  private endpointへのfetch再現・認証ヘッダ追加・追加のモデル試行は行っていない。
+- gatewayの永続台帳 `outputs/venice-read-live/runtime/state/venice-tools.json` は全体6→7レコード。
+  今回runのレコードは1件で、core/read、指定path、state:completed、本文の一致を確認した。
+  対応するローカルsessionのtool_callも1件で、attribution:host_admitted、outcome:ok、durationMs:23だった。
+- app.logの該当行は `tool read (1 target(s), 0 failed)` と `tool read ok in 23 ms`。
+  後者は同時刻に2行ある。kernelと既存read handlerのguardがそれぞれ出すログで、
+  read回数は上記のgateway台帳1件とsession記録1件で照合した。
+- 検証後にdebug IPCのrevokeが `{"ok":true,"data":{"revoked":true}}` を返した。
+  reconの記録も停止した。開発アプリは8766で稼働を維持し、helloはbridge:15 / paired:true。
+  テスト用rootとファイルは残した。
+- Console結果・gateway台帳の該当行・画面はGit除外の `outputs/venice-read-live/model-e2e-*` と
+  `model-e2e.jpg` に保存した。変更は文書だけで、src/・拡張のコード変更はない。
+
+### 不明なこと
+
+- 今回確認したのは既存Veniceタブでの単発readだけ。grantとパネルStopの自動連動、正式承認UI、
+  shell・書込・Desktopの未実装状態は変わらない。既存verifyの3件も今回の実測では再実行していない。
+- private endpoint直叩きの403原因、規約解釈、認証/attestation、provider側の履歴保持、
+  既知のContent-Type問題は未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- モデル→拡張→gateway→kernel/read→モデルの1往復は確認完了。次の機能追加は別タスクとする。
+  今回はこの事実をローカルcommitし、pushしない。
