@@ -517,3 +517,42 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - 実際の規約警告が出たので、ADRの再検討条件は成立した。private endpointのreplayは停止する。
   API移行など次の方針はユーザーの判断を待ち、このタスクでは移行・追加送信を行わない。
 - 指定の `venice: replay sender` コミットで結果を記録して停止する。pushはしない。
+
+## 2026-11-23 — 追加送信なしのリソース・Service Worker登録確認
+
+### 分かったこと
+
+- 既存の Venice タブの MAIN 文脈で読み取りだけを行った。タブは再読み込みしていない。
+  JSチャンクの追加fetch、トークン取得、ヘッダ変更、inference endpointへの追加送信はしていない。
+- `performance.getEntriesByType('resource')` の name をURLとして読み、pathname が `.js` で終わる
+  リソースを列挙した。この実行時点では0件で、同一originの一覧も空だった。
+  保持されたresource timingに対象がないという結果であり、ページがJSを使っていないことは意味しない。
+- `navigator.serviceWorker.getRegistrations()` は実行可能で、登録は1件。
+  scope は `https://venice.ai/`、active workerあり、waiting / installing はともにnull。
+- 現在の `navigator.serviceWorker.controller` は次のとおり。
+
+  ```json
+  {
+    "scriptURL": "https://venice.ai/pwa-install-sw.js",
+    "state": "activated"
+  }
+  ```
+
+- 記録器は `installed: true, recording: false, requests: 3, readingBodies: 0, limitReached: false`。
+  この3件は前タスクで保存したcaptureのままで、今回の新しいチャット送信ではない。
+
+### 不明なこと・未実施の範囲
+
+- SW登録とcontrollerの存在だけでは、送信の中継やヘッダ付与をしているとは判断できない。
+  SWソースの解析は行っていないので、その役割は不明。
+- inference endpointを含むチャンクの特定、前後2000文字の転載、fetchのヘッダ組み立て、
+  attestationの生成・取得経路、Authorization値の取得元は今回調べていない。
+- 必要な追加ヘッダ名・値の出所は未確定。候補の列挙や推測での補完はしていない。
+- 前回の403はプログラム利用禁止と継続時の利用停止を明示していた。
+  その拒否を回避するための認証・attestation再現と、追加の単発送信は実施しない。
+  今回の新しいHTTP 200 / 403やSSE先頭20行はない。
+
+### 次に確認したいこと
+
+- ADRの再検討条件が成立した状態を維持する。提供元の許可確認、または公式APIを使う方針の判断が必要。
+  今回は読み取り結果の文書化とコミットで停止し、pushはしない。
