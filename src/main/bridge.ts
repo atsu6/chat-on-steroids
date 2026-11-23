@@ -3356,6 +3356,32 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
   if (noteBrowserSeen(req)) changed();
 
+  if (route.startsWith('/venice/grant/') && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    const source = body && typeof body === 'object' ? body.sender : null;
+    const sender = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
+    if (!sender.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
+    try {
+      if (route === '/venice/grant/request') {
+        const { sender: _sender, tabUrl, ...request } = body;
+        if (typeof tabUrl !== 'string') return json(res, 400, { error: 'invalid_venice_tab' }, origin);
+        const reply = veniceToolGateway.requestGrant(request, sender.data, tabUrl);
+        const closed = () => { if (!res.writableEnded) veniceToolGateway.revokeSender(sender.data); };
+        res.once('close', closed);
+        try { return json(res, 200, await reply, origin); }
+        finally { res.off('close', closed); }
+      }
+      if (route === '/venice/grant/revoke') {
+        if (body.runId !== undefined && (typeof body.runId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.runId))) throw new Error('invalid_run');
+        return json(res, 200, { revoked: veniceToolGateway.revokeSender(sender.data, body.runId as string | undefined) }, origin);
+      }
+      if (route === '/venice/grant/document') {
+        veniceToolGateway.documentChanged(sender.data);
+        return json(res, 200, { ok: true }, origin);
+      }
+    } catch { return json(res, 400, { error: 'invalid_venice_grant_request' }, origin); }
+  }
+
   if (route === '/venice/tools' && req.method === 'POST') {
     const body = await readBody(req) as Record<string, unknown>;
     const source = body && typeof body === 'object' ? body.sender : null;

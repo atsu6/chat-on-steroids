@@ -3,7 +3,8 @@
 初回調査日: 2026-11-24。対象: `/Users/atsu/chat-on-venice`、調査時HEAD `ffa8acac`。
 同日にA案を採用し、`6cc6823c` を基点にwire型・契約コメントと合成モデルテストを追加した。
 現在は `/venice/tools` → host-admitted kernel → `core/read` の縦接続を実装し、Consoleで実測済み。
-承認UIは未実装で、開発モードの一時grant IPCを使う。同日の後続E2Eでモデル経由のreadも1回成功した
+readの承認UIを実装し、パネルからのgrant要求・ネイティブフォルダ選択・許可・停止まで実測済み（§11）。
+同日の先行E2Eでもモデル経由のreadが1回成功した
 （`docs/venice-findings.md` の「モデル経由のcore/read E2E」参照）。
 以下のパスはこのリポジトリを基準とし、既存ソースの行番号は初回調査時点のもの。
 
@@ -197,11 +198,12 @@ Screen Recording / Accessibility権限を保つ。新しいnativeコードは不
 ## 5. A/B共通で必要な接続契約
 
 以下は**ローカルツールを使うrunの提案**。現行route・型・実装と混同しない。
-Aの既存browser-only利用には、新しいapp同意・接続条件を適用しない。
+runTaskのブラウザ専用の直接利用は従来どおり。現在のパネルは今回の指定により、全実行でread grantを先に要求する（§11）。
 
 1. **runの許可はappが所有する。** 既存Electron UIで、local session / project、Veniceの脳タブ、許可tool、
    データをVeniceへ渡す範囲をユーザーが確認する。MAINから来た `postMessage` は同じwebページも作れるため、
-   origin検査とpairingだけでOS権限を与えない。bridge tokenとrunの秘密はMAIN・モデル本文へ渡さない。
+   origin検査とpairingだけでOS権限を与えない。bridge tokenはMAIN・モデル本文へ渡さない。
+   runIdはMAINに保持する照会キーであり、単独では権限にならない。
    backgroundがChrome由来のtab/document IDを付け、appは許可時のbinding/epochと照合する。
 2. **専用gatewayから既存handlerへ入る。** 例えば `/venice/tools` と専用wire型を追加する。
    clientはrun ID / call ID / surface / tool / argsを送り、app内の許可記録からcaller・session・cwdを決める。
@@ -392,7 +394,7 @@ shellの許可を「承認フォルダー内だけの操作」と説明したり
 
 **停止時の文言:** 「新しい呼び出しを停止しました。開始済みのコマンドは自動終了しません。」
 
-これらは将来の承認UIの文言案。現在のread接続は§10の開発用IPCで許可し、UIは追加していない。
+readの見出し・本文・ボタンは§11の承認UIでそのまま使用する。shellの文言は将来用であり、shellは許可しない。
 
 ## 10. core/readの縦接続（2026-11-24実装）
 
@@ -412,7 +414,7 @@ ChatGPTのrequest-idを捏造せず、ChatGPTのinbox・自動継続・Desktop�
 ファイルのschema・capability・read-only適用・canonical root/symlink検証は既存実装を再利用する。
 user/managed Skillの暗黙rootや別chatの学習cwdはこの経路へ持ち込まない。
 
-### grantを作る一時IPC
+### 初期検証用の一時IPC（通常パネルは§11）
 
 `api.debugVeniceGrant(...)` は `venice:debugGrant` という1つのIPC channelだけを使う。
 非packagedかつElectron-vite development、app本体のmain frameだけが呼べる。
@@ -473,6 +475,40 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 - 保存上限は256 call、プロセス内予約512件、grant32件、1結果のJSONは1,000,000 bytes。
   上限到達は明示的な拒否/エラーとし、過去のcall IDを忘れて再実行できるようにはしない。
 - grantの明示revoke・bridge Disconnect・app終了で新規実行を止める。別documentは以前のrun設定を継承しない。
-  このdebug grantとパネルのtask Stop/完了の自動連動、承認UIとsession/providerの本格統合は後段階。
+  現在のパネルは§11の承認UIとStop失効を使う。完了後もrunIdを保持し、完了自体では失効させない。
+  session/providerの全面統合は後段階。
 - `desktopUnattributed`を有効にせず、shell・patch・find・Desktop・画像添付は公開しない。
   テキストreadの縦接続までを確認し、画像をモデルが見られるという扱いにはしない。
+
+## 11. パネルからrun単位でreadを許可する（2026-11-24実装）
+
+パネルの指示と最大ステップ数を設定して「実行」を押す。Electronの承認ダイアログで対象を確認し、
+「フォルダを選ぶ」から読み取り対象を選び、「このrunだけ許可」を押す。拒否・時間切れならステップ欄に理由が出て、モデル送信は始まらない。
+完了後も「停止」を押すと、このrunの新しいreadを拒否する。runIdと実行済みステップは保持する。
+
+- 拡張は `/venice/grant/request` へ `{tools:['core/read'],instructionSummary}` を送り、backgroundが
+  requestIdとChrome MessageSender由来のtab/document/URLを付ける。browser IDは既存認証headerを使う。
+  appは承認までHTTP応答を保留し、`{runId}` または `{error:拒否理由}` を返す。
+- gatewayが保留要求（最大8件、120秒）とgrantの所有者。固定IPC `venice:grantPending` が一覧を通知する。
+  app main frameだけの `venice:grantPick` / `venice:grantAnswer` が選択・承認を行い、
+  `venice:context` はappで選択したsessionだけを伝える。ロード時は同じ固定IPCから保留一覧を取得する。
+- sessionはappの選択済みローカルsessionを使う。未選択・終了済み・ChatGPTに紐付くsessionなら、
+  appが新しいVeniceローカルsessionを作る。元sessionがあればそのprojectを継承する。
+  ダイアログのsession/projectはappの保存情報、VeniceタブはChrome由来、toolはapp固定allowlistから表示する。
+  instructionSummaryは別の「ブラウザからの指示」としてtextContentで表示し、対象情報を上書きしない。
+- ネイティブpickerの選択を既存sandboxのvalidateNewRootでcanonical化し、実パスを表示する。
+  選択はrun専用rootsで、全体configの承認rootを追加・変更しない。フォルダ未選択はUIとmainの両方で許可を拒否する。
+  grant内のRoot snapshotで既存resolvePathを通し、core/read schema・live read capability・read-only・shield・記録を維持する。
+  初期debug IPCだけは従来どおり、config内の既存named rootを選ぶ。
+- app発行のgrantを `state/venice-grants.json` に永続化してからrunIdを返す。
+  このファイルは保存記録であり、再起動時に実行権限として復元しない。app終了時は全grantを失効し、保存をdrainする。
+- パネル停止は `/venice/grant/revoke` で同じ認証済みbrowser/tab/documentのgrantと保留要求を失効する。
+  MV3のsession storageにdocument bindingを保持し、loading/URL変更/タブ閉鎖でも失効を通知する。
+  新documentの起動通知 `/venice/grant/document` も旧documentのgrantを失効させる。
+  grantを待つHTTPはtab操作queueを占有せず、Stopが承認待ちの後ろで詰まらない。
+- 保存済みcall結果の同一所有者による再取得は従来契約どおり。失効後に同じrunIdで新しいcallIdを送ると `RUN_REVOKED`。
+  承認UIは日本語の指定文言を使用する。shell・書込・Desktopの権限は含まない。
+
+今回の実測: configにない合成フォルダをネイティブ選択して許可し、パネルのcore/readとdoneがともにok:true。
+停止後もrunIdは同じで、新規readはRUN_REVOKED。gateway・sessionの実行記録は各1件、モデル通信は2回ともHTTP 200。
+詳細はfindings「grant要求・承認UIとrun失効」を参照する。

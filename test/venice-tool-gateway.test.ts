@@ -173,3 +173,83 @@ it('serves the authenticated POST route, rejects spoofed documents, and preserve
   const hello = await (await fetch(`http://127.0.0.1:${port}/hello`)).json() as { bridge: number };
   expect(hello.bridge).toBe(BRIDGE_PROTOCOL);
 });
+
+function approval(gateway: VeniceToolGateway) {
+  const notify = vi.fn();
+  gateway.setApprovalUi({ notify, context: async () => ({ sessionId, sessionTitle: 'App-owned session', project: null }) });
+  const input = () => ({ requestId: randomUUID(), tools: ['core/read'], instructionSummary: 'synthetic instruction' });
+  const wait = async () => { for (let i = 0; i < 30; i++) { const row = gateway.pendingApprovals()[0]; if (row) return row; await new Promise(resolve => setImmediate(resolve)); } throw new Error('missing approval'); };
+  return { notify, input, wait };
+}
+
+it('keeps app-owned targets, denies empty folders and returns a readable denial without executing', async () => {
+  const f = model(), a = approval(f.gateway), input = a.input();
+  const reply = f.gateway.requestGrant(input, sender, 'https://venice.ai/chat/synthetic');
+  expect(f.gateway.requestGrant(input, sender, 'https://venice.ai/chat/synthetic')).toBe(reply);
+  const pending = await a.wait();
+  expect(pending.sessionTitle).toBe('App-owned session'); expect(pending.tools).toEqual(['core/read']);
+  await expect(f.gateway.answerApproval(pending.id, true)).rejects.toThrow('venice_folder_required');
+  await f.gateway.answerApproval(pending.id, false);
+  expect(await reply).toEqual({ error: 'ファイルの読み取りを許可しませんでした。' });
+  expect(f.execute).not.toHaveBeenCalled(); expect(f.gateway.pendingApprovals()).toEqual([]);
+  expect(() => f.gateway.requestGrant({...input,sessionId:'forged'}, sender, 'https://venice.ai/')).toThrow();
+  expect(() => f.gateway.requestGrant({...input,tools:['core/exec_command']}, sender, 'https://venice.ai/')).toThrow();
+});
+
+it('durably saves a picked run before returning its ID, revokes by sender and never widens configured roots', async () => {
+  const barrier = deferred(), saving = deferred();
+  const saveGrants = vi.fn(async () => { saving.resolve(); await barrier.promise; });
+  const execute = vi.fn(async () => ({}));
+  const gateway = new VeniceToolGateway({load:async()=>null,save:async()=>{},saveGrants,execute});
+  const a = approval(gateway), before = structuredClone(getConfig().roots);
+  const reply = gateway.requestGrant(a.input(), sender, 'https://venice.ai/chat/synthetic');
+  const pending = await a.wait();
+  await gateway.chooseApprovalRoots(pending.id, [path.join(base,'outside')]);
+  let returned = false; void reply.then(() => { returned = true; });
+  const answer = gateway.answerApproval(pending.id, true);
+  await saving.promise; expect(returned).toBe(false); barrier.resolve(); await answer;
+  const grant = await reply; expect('runId' in grant).toBe(true);
+  if (!('runId' in grant)) throw new Error(grant.error);
+  expect(getConfig().roots).toEqual(before);
+  expect(gateway.revokeSender({...sender,documentId:'other'},grant.runId)).toBe(false);
+  expect(gateway.revokeSender(sender,grant.runId)).toBe(true);
+  expect((await gateway.call(request(grant.runId),sender)).error).toBe('RUN_REVOKED');
+  expect(execute).not.toHaveBeenCalled();
+});
+
+it('cancels pending approvals on reload and shutdown, including a late durable grant completion', async () => {
+  const saving = deferred(), barrier = deferred();
+  const gateway = new VeniceToolGateway({load:async()=>null,save:async()=>{},execute:async()=>({}),saveGrants:async()=>{saving.resolve();await barrier.promise;}});
+  const a = approval(gateway), reply = gateway.requestGrant(a.input(),sender,'https://venice.ai/');
+  const pending = await a.wait(); await gateway.chooseApprovalRoots(pending.id,[path.join(base,'root')]);
+  const answer = gateway.answerApproval(pending.id,true);
+  await saving.promise; gateway.documentChanged({...sender,documentId:'new-document'});
+  expect(await reply).toEqual({error:'このrunは停止されました。'});
+  barrier.resolve(); await expect(answer).rejects.toThrow('venice_run_revoked');
+  const stopped = gateway.requestGrant(a.input(),{...sender,documentId:'new-document'},'https://venice.ai/');
+  await a.wait(); await gateway.stop(); expect(await stopped).toEqual({error:'アプリとの接続が終了しました。'});
+});
+
+it('reads a native-picked root outside the global config through the real kernel', async () => {
+  const selected = path.join(base,'picked-only'); await fs.mkdir(selected); await fs.writeFile(path.join(selected,'note.txt'),'picked root content');
+  const a = approval(veniceToolGateway), before = structuredClone(getConfig().roots);
+  const reply = veniceToolGateway.requestGrant(a.input(),sender,'https://venice.ai/');
+  const pending = await a.wait(); await veniceToolGateway.chooseApprovalRoots(pending.id,[selected]);
+  await veniceToolGateway.answerApproval(pending.id,true); const grant = await reply;
+  if (!('runId' in grant)) throw new Error(grant.error);
+  const read = await veniceToolGateway.call({...request(grant.runId),args:{paths:[path.join(selected,'note.txt')]}},sender);
+  expect(JSON.stringify(read.result)).toContain('picked root content'); expect(getConfig().roots).toEqual(before);
+  const persisted = await readDurable<unknown[]>('venice-grants'); expect(JSON.stringify(persisted)).toContain(grant.runId);
+  veniceToolGateway.documentChanged({...sender,documentId:'reloaded'});
+  expect((await veniceToolGateway.call(request(grant.runId),sender)).error).toBe('RUN_REVOKED');
+});
+
+it('shutdown durably marks granted runs inactive and refuses any new call', async () => {
+  const snapshots: unknown[][] = [], execute = vi.fn(async()=>({}));
+  const gateway = new VeniceToolGateway({load:async()=>null,save:async()=>{},execute,
+    saveGrants:async rows=>{snapshots.push(structuredClone(rows));}});
+  const granted = await grant(gateway); await gateway.stop();
+  expect(snapshots.at(-1)).toMatchObject([{active:false}]);
+  expect((await gateway.call(request(granted.runId),sender)).error).toBe('RUN_REVOKED');
+  expect(execute).not.toHaveBeenCalled();
+});

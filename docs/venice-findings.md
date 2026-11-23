@@ -1161,3 +1161,52 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - モデル→拡張→gateway→kernel/read→モデルの1往復は確認完了。次の機能追加は別タスクとする。
   今回はこの事実をローカルcommitし、pushしない。
+
+
+## 2026-11-24 — grant要求・承認UIとrun失効
+
+### 分かったこと
+
+- pwdと直近3 commitを確認した。開始HEADは `26188ebf`、続く履歴は `dc684ae0` / `13f9929a`。
+  AGENTS.mdのElectron統合範囲と統合計画に従った。
+- POST `/venice/grant/request`、`/venice/grant/revoke`、`/venice/grant/document` を既存認証の内側に追加した。
+  readだけを受理し、senderはbackgroundの実Chrome情報、session/projectはapp情報で確定する。
+  gatewayが保留一覧・期限・許可・取消を所有し、固定IPCがrendererへ通知する。
+- 見出しと本文は計画§9の指定をそのまま使った。既存plugin-dialogのmodal・配色・ボタンを再利用し、
+  拒否に初期focus、未選択の許可はdisabled、Escapeは拒否とした。HTML様の指示やpathもtextContentで表示する。
+- フォルダはネイティブpickerから選択し、既存sandboxでcanonical化する。選択したRoot snapshotはrunだけの権限で、
+  configの承認rootへは追加しない。grantをvenice-grants.jsonに保存してからrunIdを返し、再起動時の権限として復元しない。
+- パネルは承認前にモデルへ送信しない。拒否理由をステップ欄に表示し、実行中/完了後もrunIdを保持する。
+  Stop、脳documentの変更/再読み込み、app終了で失効する。Stopは保留HTTPの待ちqueueに入れない。
+- 稼働中のelectron-vite devはmain/preloadを自動更新しなかったため、ユーザーの追加承認を得て開発アプリだけを1回再起動した。
+  同じ検証用profile・CLF_BRIDGE_PORTS=8766を維持した。通常アプリは起動していない。
+  Chromeの開発拡張はユーザーが再読み込みし、対象Veniceタブを更新した。
+- 実測用に `outputs/venice-read-live/grant-ui-root/note.txt` へ「青い傘と赤い椅子」と改行を保存した。
+  このrootは全体configに存在しない。パネルから絶対pathのread指示、maxSteps:5で実行した。
+- 承認ダイアログと未選択時のdisabledを実画面で確認した。操作ツールのnativeクリックがタイムアウトしたため、
+  ユーザーにフォルダ選択と許可を依頼した。その後、実台帳とパネルで許可・成功を確認した。
+  途中で「時間切れ」と報告した判断は誤りで、実際には同じrunが成功していた。モデル実行を再試行していない。
+- 02:09 JSTの結果は `core/read / ok:true`、`done / ok:true`、summary「青い傘と赤い椅子」。
+  今回reconの通信record #1 / #2はどちらもHTTP 200、complete:true。
+  gatewayのcompleted記録1件とhost_admittedのsession tool_call 1件を照合した。
+- 完了後にパネルの停止を実行し、「失効済み」でもrunIdが保持されることを確認した。
+  同じrunIdを保持したまま新しいcallIdでreadすると `ok:false / RUN_REVOKED`。
+  保存grantはactive:false、configured:falseで、configに当該rootが追加されていないことも確認した。
+- 追加の表示確認用requestはrunTaskを起動せず、承認ダイアログの画面だけを保存して取消した。
+  reconを停止し、保留画面も閉じた。開発アプリは8766で稼働中。既知の2.1.54 / bridge:15 / paired:trueを維持する。
+- 型チェック、build、拡張4ファイルのnode --checkが成功した。
+  gateway14件、renderer承認UI2件、IPC252件、i18n11件と、拡張の関連53件が成功した。
+  未選択拒否・保存完了前のID非公開・別sender拒否・遅延保存中のreload・shutdown・選択rootの実kernel readを含む。
+- 生IDを含むConsole結果、台帳の該当行、画面、build/testログはGit除外の `outputs/venice-read-live/grant-*` に保存した。
+  src/rendererの日本語文言は指定どおり。shellの許可やdesktopUnattributedの有効化は行っていない。
+
+### 不明なこと
+
+- 他言語での新ダイアログ文言は未対応。shell・書込・Desktop、画像、provider sessionの全面統合は今回の対象外。
+- 全体verifyは今回再実行していない。先行タスクの既存3件（extension-i18n / extension-popup / Firefoxの既存innerHTML）を引き継ぐ。
+- private endpointの403原因、規約解釈、認証/attestation、provider側の履歴保持、Content-Typeは未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- パネルの承認→read→Stop→同じrunIdで拒否、まで確認完了。現行手順と期限・保存/失効の意味は統合計画§11を参照。
+  今回のコード・関連テスト・文書をローカルcommitする。pushしない。

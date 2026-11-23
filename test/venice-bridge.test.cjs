@@ -97,11 +97,11 @@ test('ensureTab waits for navigation before resolving and removes navigation lis
   const opening = h.request('ensureTab', {url: 'https://example.test/start'}).then(reply => { resolved = true; return reply; });
   await tick();
   assert.equal(resolved, false);
-  assert.equal(h.updates.size, 1);
+  assert.equal(h.updates.size, 2); // One permanent grant-lifecycle listener plus navigation.
   h.complete(10, 'https://example.test/redirected');
   assert.equal((await opening).result.url, 'https://example.test/redirected');
-  assert.equal(h.updates.size, 0);
-  assert.equal(h.removals.size, 0);
+  assert.equal(h.updates.size, 1); // Only the permanent grant-lifecycle listener remains.
+  assert.equal(h.removals.size, 1);
 });
 
 test('navigation timeout and closing during navigation return errors without retrying', async t => {
@@ -114,8 +114,8 @@ test('navigation timeout and closing during navigation return errors without ret
   assert.equal(timers.get(1).ms, 30_000);
   timers.get(1).fn();
   assert.match((await opening).error, /30秒.*タイムアウト/);
-  assert.equal(h.updates.size, 0);
-  assert.equal(h.removals.size, 0);
+  assert.equal(h.updates.size, 1); // Only the permanent grant-lifecycle listener remains.
+  assert.equal(h.removals.size, 1);
   assert.equal(timers.size, 0);
   const reopening = h.request('ensureTab', {url: 'https://example.test/next'});
   await tick();
@@ -185,11 +185,11 @@ test('ISOLATED ignores wrong origins and sources and forwards only the fixed mes
     h.brain.dispatchEvent(new h.brain.MessageEvent('message', {data: {__cosVeniceBridge: request}, origin, source}));
   }
   await tick();
-  assert.equal(h.runtimeMessages.length, 0);
+  assert.deepEqual(h.runtimeMessages.map(message => message.op), ['localDocument']);
   h.brain.postMessage({__cosVeniceBridge: request}, 'https://venice.ai');
   await tick();
-  assert.equal(h.runtimeMessages[0].type, 'cos-venice-bridge');
-  assert.equal(h.runtimeMessages[0].id, 'synthetic-id');
+  assert.equal(h.runtimeMessages[1].type, 'cos-venice-bridge');
+  assert.equal(h.runtimeMessages[1].id, 'synthetic-id');
 });
 
 test('runtime disconnects and empty replies become tool errors', async t => {

@@ -92,6 +92,18 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('restricts every Venice approval IPC to the app main frame', async () => {
+  const previous = currentWindow, contents = { send: vi.fn(), mainFrame: {} };
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: contents };
+  try {
+    for (const channel of ['venice:context', 'venice:grantPending', 'venice:grantPick', 'venice:grantAnswer']) {
+      for (const event of [{sender:{},senderFrame:contents.mainFrame},{sender:contents,senderFrame:{}}]) {
+        expect(await handlers.get(channel)!(event, {})).toEqual({ok:false,error:'venice_invalid_renderer'});
+      }
+    }
+  } finally { currentWindow = previous; }
+});
+
 it('refuses the Venice debug grant outside development, in packages, and from foreign senders or frames', async () => {
   const previousWindow = currentWindow, previousMode = process.env.NODE_ENV_ELECTRON_VITE, packaged = app.isPackaged;
   const contents = { send: vi.fn(), mainFrame: {} };

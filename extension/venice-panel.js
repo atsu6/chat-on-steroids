@@ -3,12 +3,12 @@
   'use strict';
   const ORIGIN = 'https://venice.ai';
   if (location.origin !== ORIGIN) return;
-  let ready = false, activeId = null, stopping = false, ui;
+  let ready = false, activeId = null, lastId = null, runId = null, stopping = false, revoked = false, ui;
   const post = (op, extra = {}) => window.postMessage({type: 'cos-venice-panel-request', op, ...extra}, ORIGIN);
   function sync() {
     if (!ui) return;
     ui.run.disabled = !ready || Boolean(activeId) || !ui.instruction.value.trim();
-    ui.stop.disabled = !activeId || stopping;
+    ui.stop.disabled = (!activeId && (!runId || revoked)) || stopping;
     ui.instruction.disabled = Boolean(activeId);
     ui.maxSteps.disabled = Boolean(activeId);
   }
@@ -24,7 +24,10 @@
       if (ui && !activeId) { ui.state.textContent = '待機中'; message(''); }
       sync(); return;
     }
-    if (!ui || !activeId || data.id !== activeId) return;
+    if (!ui || data.id !== (activeId ?? lastId)) return;
+    if (data.event === 'awaiting') ui.state.textContent = 'アプリの承認待ち';
+    if (data.event === 'granted' && typeof data.runId === 'string') { runId = data.runId; ui.state.dataset.runId = runId; }
+    if (data.event === 'revoked') { revoked = true; if (!activeId) stopping = false; ui.state.textContent = activeId ? '停止待ち' : '失効済み'; message('このrunの許可を失効させました。'); sync(); return; }
     if (data.event === 'started') ui.state.textContent = '実行中';
     if (data.event === 'stopping') {
       stopping = true;
@@ -47,6 +50,7 @@
     if (['done', 'stopped', 'error'].includes(data.event)) {
       ui.state.textContent = {done: '完了', stopped: '停止', error: 'エラー'}[data.event];
       ui.state.dataset.error = String(data.event === 'error');
+      if (data.event === 'error' && !runId) { const row = document.createElement('li'); row.dataset.ok = 'false'; row.textContent = `承認/実行エラー / ${data.error ?? '拒否されました。'}`; ui.steps.appendChild(row); }
       message(String(data.event === 'done' ? data.summary ?? '' : data.error ?? '処理を終了しました。'));
       activeId = null;
       stopping = false;
@@ -104,9 +108,10 @@
       event.preventDefault();
       if (activeId || !ready || !ui.instruction.value.trim() || !event.target.reportValidity()) return;
       activeId = crypto.randomUUID();
+      lastId = activeId; runId = null; revoked = false; delete ui.state.dataset.runId;
       stopping = false;
       ui.steps.replaceChildren();
-      ui.state.textContent = '実行中';
+      ui.state.textContent = 'アプリの承認待ち';
       ui.state.dataset.error = 'false';
       message('');
       sync();
@@ -114,11 +119,11 @@
     });
     ui.instruction.addEventListener('input', sync);
     ui.stop.addEventListener('click', () => {
-      if (!activeId || stopping) return;
+      if ((!activeId && !runId) || stopping) return;
       stopping = true;
       ui.state.textContent = '停止要求中';
       message('停止を要求しています…');
-      sync(); post('stop', {id: activeId});
+      sync(); post('stop', {id: activeId ?? lastId});
     });
     shadow.getElementById('toggle').addEventListener('click', event => {
       const collapsed = host.toggleAttribute('data-collapsed');

@@ -126,7 +126,7 @@ test('panel sends input/options via postMessage and renders progress and summary
   assert.equal(panel.get('instruction').disabled, true);
   await settled(() => panel.get('state').textContent === '完了');
   assert.equal(h.prompts.length, 2);
-  assert.equal(panel.get('stop').disabled, true);
+  assert.equal(panel.get('stop').disabled, false); // Completed run retains its grant until Stop.
   assert.equal(panel.get('run').disabled, false);
   const rows = panel.get('steps').querySelectorAll('li');
   assert.equal(rows.length, 2);
@@ -148,7 +148,7 @@ test('panel rejects step limits outside 1..40 and shows partial progress on a re
   await settled(() => panel.get('state').textContent === 'エラー');
   assert.match(panel.get('message').textContent, /exceeded maxSteps/);
   assert.equal(panel.get('steps').children.length, 1);
-  assert.equal(panel.get('stop').disabled, true);
+  assert.equal(panel.get('stop').disabled, false);
 });
 
 test('panel stop is pending until the send finishes and cannot stop a different run id', async t => {

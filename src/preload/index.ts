@@ -1,3 +1,4 @@
+import type { VeniceGrantPending } from '../shared/venice-integration.js';
 import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
 import type { DesktopAskPending } from '../shared/desktop-ask.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
@@ -116,6 +117,15 @@ export interface SessionDetail {
 }
 
 const api = {
+  veniceContext: (sessionId: string | null) => call<void>('venice:context', { sessionId }),
+  veniceGrantPending: () => call<VeniceGrantPending[]>('venice:grantPending'),
+  veniceGrantPick: (id: string) => call<VeniceGrantPending[]>('venice:grantPick', { id }),
+  veniceGrantAnswer: (id: string, allow: boolean) => call<void>('venice:grantAnswer', { id, allow }),
+  onVeniceGrantPending: (listener: (pending: VeniceGrantPending[]) => void): (() => void) => {
+    const wrapped = (_event: unknown, pending: VeniceGrantPending[]): void => listener(pending);
+    ipcRenderer.on('venice:grantPending', wrapped);
+    return () => ipcRenderer.removeListener('venice:grantPending', wrapped);
+  },
   debugVeniceGrant: (payload: { action: 'grant'; sessionId: string; roots: string[];
     sender: { browserId: string; tabId: number; documentId: string } } | { action: 'revoke'; runId: string }) =>
     call<{ runId?: string; revoked?: boolean }>('venice:debugGrant', payload),

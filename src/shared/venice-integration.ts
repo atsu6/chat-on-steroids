@@ -59,3 +59,16 @@ export interface VeniceRunGrant {
   /** Approved filesystem roots; this list does not sandbox a shell process. */
   roots: string[];
 }
+
+/** App-owned approval view. Only instructionSummary is browser-authored, not identity. */
+export interface VeniceGrantPending {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  project: { id: string; name: string } | null;
+  tab: { id: number; url: string };
+  tools: ['core/read'];
+  instructionSummary: string;
+  roots: string[];
+}
+export type VeniceGrantReply = { runId: string } | { error: string };
