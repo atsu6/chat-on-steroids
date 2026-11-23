@@ -61,6 +61,15 @@ fetch再現の403の原因、§12(d)の解釈、attestationと認証ヘッダの
   対象なし、disabled、inert、切断済み、イベント未発生は `ok: false`。
   クリック先のアプリ処理・通信の成功までは意味しない。
 - `scroll` / `{dy}`: 有限の数値を受け取り、`window.scrollBy(0, dy)` 後の `scrollY` を返す。
+- `fill` / `{selector, value}`: 最初の一致要素へスクロールし、プロトタイプのvalue setterで文字列を設定する。
+  続けてbubbles付きのinput / changeを送り、`{filled: true}` を返す。空文字でクリアできる。
+  要素なし・value setterなし・文字列以外の値は `ok: false`。
+- `press` / `{selector, key}`: 最初の一致要素に、指定keyの合成keydown / keypress / keyupを順番に送る。
+  イベントはbubbles / composed付き、isComposing=false。`{pressed: true, key}` を返す。
+  keyはEnter等の空でない文字列。文字列の入力にはfillを使う。
+- `wait` / `{ms}`: 作業タブで指定時間待つ。0以上の有限の数値を受け取り、10000超は10000へ制限する。
+  `{ms: 適用した待機指定値}` を返す。このmsは実際の経過時間ではない。
+- `activate` / `{}`: 既存のbackground操作で作業タブをアクティブ化し、`{tabId}` を返す。
 
 DOMツールの前に `tab_open` を実行する。作業タブがない場合はすべて
 `{ok: false, error: '作業タブがありません。先に tab_open(url) を実行してください。'}` を返す。
@@ -75,7 +84,9 @@ DOMツールの前に `tab_open` を実行する。作業タブがない場合�
 上限内に `done` がなければ、件数と最後のactionを含む例外を投げる。
 例外の `stepCount`、`lastAction`、`steps` から経過も参照できる。
 
-検証は合成DOM・合成モデル応答のみ。実Veniceでのタスクループは実行していない。
+2026-11-23のユーザー実行報告では、runTaskのtab_open・作業タブのquery / read_textが動作し、
+h1不在の報告からdoneに至った（stepsは4件、tab_openはok=true）。詳細はfindingsの成功記録を参照。
+今回追加のfill / press / wait / activateは合成DOM・合成モデル応答で検証している。
 
 ## MAINから作業タブへのブリッジ
 
@@ -98,7 +109,8 @@ backgroundは脳タブごとに1つの作業タブを所有し、IDを
 - `ensureTab` / `{url}`: 未作成なら `tabs.create({url, active: false})`。
   既存なら `tabs.update(tabId, {url})`。読み込み完了を最大30秒待ち、
   `{ok: true, result: {tabId, url}}` を返す。Veniceタブは遷移させない。
-- `eval` / `{name, args}`: background内の固定関数表にあるDOM 4ツールだけを
+- `eval` / `{name, args}`: background内の固定関数表にあるquery / read_text / click_selector /
+  scroll / fill / press / waitだけを
   `scripting.executeScript` で作業タブのトップフレーム・ISOLATEDに実行する。
   任意コードや関数名の式評価は受け付けない。戻り値はDOMツールの `{ok, result?, error?}`。
 - `activate`: 作業タブへ `tabs.update(tabId, {active: true})`。
@@ -117,7 +129,8 @@ node --check extension/venice-agent.js
 node --check test/venice-agent.test.cjs
 node --check test/venice-bridge-harness.cjs
 node --check test/venice-bridge.test.cjs
-node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-ui-send.test.cjs
+node --check test/venice-input.test.cjs
+node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-input.test.cjs test/venice-ui-send.test.cjs
 ```
 
 ## 取得済みSSEのオフライン解析

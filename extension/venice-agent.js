@@ -7,7 +7,11 @@ tab_open({url}) -> 作業用タブを作成または指定URLへ遷移してURL�
 query({selector}) -> 件数と最大20件の番号・tagName・id・クラス先頭・テキスト先頭40文字
 read_text({selector?}) -> 指定要素（省略時body）のinnerText、空白を畳んで最大2000文字
 click_selector({selector}) -> 最初の一致要素へスクロールしてclick。okはclickイベント発生の確認で、処理完了の確認ではない
-scroll({dy}) -> window.scrollBy(0, dy)後のscrollY`;
+scroll({dy}) -> window.scrollBy(0, dy)後のscrollY
+fill({selector, value}) -> 作業タブの要素へ文字列を設定し、input/changeを送る
+press({selector, key}) -> 作業タブの要素へkeydown/keypress/keyupを送る（例: Enter）
+wait({ms}) -> 作業タブで指定ms待つ。上限10000ms
+activate() -> 作業タブをアクティブにする`;
 
 function buildTurn(instruction, toolResult) {
   let turn = CONTRACT + '\n---\n指示: ' + instruction;
@@ -104,6 +108,10 @@ const TOOL_REGISTRY = Object.freeze({
   read_text: (args = {}) => callVeniceBridge('eval', {name: 'read_text', args}),
   click_selector: (args = {}) => callVeniceBridge('eval', {name: 'click_selector', args}),
   scroll: (args = {}) => callVeniceBridge('eval', {name: 'scroll', args}),
+  fill: (args = {}) => callVeniceBridge('eval', {name: 'fill', args}),
+  press: (args = {}) => callVeniceBridge('eval', {name: 'press', args}),
+  wait: (args = {}) => callVeniceBridge('eval', {name: 'wait', args}),
+  activate: () => callVeniceBridge('activate'),
 });
 
 async function executeTool(name, args) {
