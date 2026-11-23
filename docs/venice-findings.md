@@ -659,3 +659,35 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 既存の成功記録を独立検証する場合は、対応するcaptureファイル名・record番号が必要。
   今回はユーザー報告として記録し、追加送信・pushは行わない。
+
+## 2026-11-23 — runTask と現在タブのDOMツール（実送信なし）
+
+### 分かったこと
+
+- `extension/venice-agent.js` の既存 `runTurn` / `now` に、`query`、`read_text`、
+  `click_selector`、`scroll` と `runTask` を追加した。既存のVenice用manifest登録をコミット対象に含める。
+  参照・操作先は現在のdocument/windowのみで、Chrome APIは使わない。
+- queryは総件数と最大20件の番号付き要約、read_textはinnerTextの空白を畳んだ最大2000文字。
+  click_selectorはスクロール後のclickイベント発生を確認する。対象なし・disabled等は `ok: false`。
+  イベント発生はクリック先の処理成功とは区別する。scrollはscrollBy後のscrollYを返す。
+- runTaskは同じ指示と直前のツール結果でrunTurnを繰り返し、doneで `{summary, steps}` を返す。
+  stepsには終了を含む各ステップのnameとokを保持する。既定10、最大40ステップ。
+  上限時は件数・最後のactionをメッセージと例外プロパティに残す。
+- `node --check`（実装・新規テスト）と
+  `node --test test/venice-agent.test.cjs test/venice-ui-send.test.cjs` が成功した（23件）。
+  即done、連続tool、失敗結果の引渡し、既定/指定/40の上限、上限ちょうどのdone、
+  DOMの件数・文字数制限、クリック失敗、スクロールを合成データで確認した。
+  jsdomにinnerText/レイアウトがないため、innerTextとスクロールは合成値・スタブで検証した。
+- 実送信は0回。新しいcaptureおよびrecord番号はない。上の根拠はローカル合成テストで、
+  過去の実通信recordとは別の証拠である。
+
+### 不明なこと
+
+- 実Venice UIでの複数ステップ動作・レイアウトを伴うスクロールは未確認。
+- private endpoint直叩きの403原因、§12(d)の解釈、attestationと認証ヘッダの要否、
+  サーバ側の履歴保持、Content-Typeは未解明のまま引き継ぐ。今回の調査・再送対象に含めていない。
+
+### 次に確認したいこと
+
+- 実UIでの検証に進む場合は利用許可と送信範囲を先に確認する。
+  今回は合成検証とローカルcommitまでとし、pushしない。
