@@ -55,10 +55,11 @@ private endpoint の再送はここで停止した。API 移行は再検討対�
 
 ### 現行の送信方式
 
-`__cosVeniceSend.sendViaUi(text)` が実UIの `チャットメッセージ入力` TEXTAREA に
+`__cosVeniceSend.sendViaUi(text)` が `form textarea[aria-label="チャットメッセージ入力"]` に
 native value setterで文字列を入れ、bubbling `input` の後、requestAnimationFrameを2回と50ms待つ。
-入力値が空なら停止する。有効な送信ボタンがあればさらに100ms待ってクリックし、
-ボタンなし・disabledならEnterの `keydown` / `keypress` / `keyup` を送る。
+入力値が空なら停止する。続けて `form [aria-label="メッセージを送信"]` を
+100ms間隔・最大3000msで確認し、出現かつdisabledでなくなったらクリックする。
+期限内に有効にならなければEnterの `keydown` / `keypress` / `keyup` を送る。
 キーイベントは `composed: true` / `isComposing: false`。
 private endpointへのfetch再現は使わない。
 既存 `sendTurn` は「403 のため未使用」として残す。
@@ -75,6 +76,6 @@ senderは同じrecordの差分を連結して `venice-sse.js` で解析する。
 
 - UI操作を関数から行うことの許可の可否と、§12(d)の解釈。
 - fetch再現の403の原因、attestationと認証ヘッダの要否。
-- 合成イベントによる実UI送信の成立と、実アカウントでの応答取得。
+- 今回修正したsenderによる実UI送信の成立と、実アカウントでの応答取得。
 
 今回の検証は合成DOM・合成通信・仮想時計のみ。実送信は行わない。

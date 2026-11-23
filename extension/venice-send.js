@@ -220,7 +220,7 @@
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
-  const sendButton = () => document.querySelector('button[aria-label*="送信"], button[type="submit"]');
+  const sendButton = () => document.querySelector('form [aria-label="メッセージを送信"]');
   const buttonDisabled = button => button.disabled || button.matches(':disabled');
   function pressEnter(textarea) {
     for (const type of ['keydown', 'keypress', 'keyup']) {
@@ -238,7 +238,7 @@
     const recon = window.__cosVeniceRecon;
     const parser = window.__cosVeniceSse;
     if (!recon || !parser) throw new Error('Venice の記録器または SSE パーサが未注入です。');
-    const textarea = document.querySelector('textarea[aria-label="チャットメッセージ入力"]');
+    const textarea = document.querySelector('form textarea[aria-label="チャットメッセージ入力"]');
     if (!textarea) throw new Error('チャットメッセージ入力の TEXTAREA が見つかりません。');
     if (!recon.status().recording) recon.start();
     const baseline = recon.chatProgress().lastChatNumber;
@@ -255,14 +255,14 @@
       await nextFrame();
       await sleep(50);
       if (!textarea.value.trim()) throw new Error('待機後の TEXTAREA が空のため送信を停止しました。');
-      const button = sendButton();
-      if (button && !buttonDisabled(button)) {
-        await sleep(100);
-        if (button.isConnected && !buttonDisabled(button)) button.click();
-        else pressEnter(textarea);
-      } else {
-        pressEnter(textarea);
+      const buttonDeadline = Date.now() + 3_000;
+      let button = sendButton();
+      while ((!button || buttonDisabled(button)) && Date.now() < buttonDeadline) {
+        await sleep(Math.min(100, buttonDeadline - Date.now()));
+        button = sendButton();
       }
+      if (button && !buttonDisabled(button) && Date.now() <= buttonDeadline) button.click();
+      else pressEnter(textarea);
       const sentAt = Date.now();
       const deadline = sentAt + 90_000;
       let nudged = false;

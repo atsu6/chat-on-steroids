@@ -6,7 +6,7 @@
 - `setModel(id)`
 - `isAlive()`
 
-## 送信実装の現状（2026-11-23）
+## 送信実装の現状（2026-11-24）
 
 `extension/venice-send.js` に `sendViaUi(text)` が存在する。
 空でない文字列を受け取り、UI入力と応答の取得・SSE解析を経て、本文文字列を返す非同期関数。
@@ -14,12 +14,15 @@
 モデル指定の引数はなく、旧 `sendTurn(messages, model)` の置き換えに伴い戻り値も
 Response ではなく本文文字列になっている。
 
+入力欄は `form textarea[aria-label="チャットメッセージ入力"]` に限定する。
 値の設定とinputイベントの後、requestAnimationFrameを2回と50ms待ち、入力値が空なら停止する。
-送信ボタン（`button[aria-label*="送信"]` または `button[type="submit"]`）が有効なら、
-さらに100ms待ってクリックする。ボタンなし・disabledならEnterへフォールバックする。
+続けて `form [aria-label="メッセージを送信"]` を100ms間隔・最大3000msで確認し、
+出現してdisabledでなくなった時点でクリックする。フォーム外や汎用submitボタンは使わない。
+期限内に有効なボタンが得られなければEnterへフォールバックする。
 Enterの3イベントは `composed: true` / `isComposing: false` を指定する。
 送信トリガ後に500ms間隔でchatProgressを確認し、2秒経ってもrecord番号が基準値のままの場合だけ、
 Enterをもう1回送る（nudgeは最大1回）。新しいrecordの本文が未完了でも、番号が進んでいればnudgeしない。
+このnudge条件は従来どおり、初回がボタンクリックの場合にも適用する。
 応答待ちの上限90秒は初回の送信トリガ後から数える。
 タイムアウト例外は従来の `baseline` / `chatProgress` に加え、`textareaLength`、
 `buttonFound`、`buttonDisabled` を持ち、メッセージにも含める。ボタンなしのdisabled状態はnull。
