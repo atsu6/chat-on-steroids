@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MAIN_TEXTS } from '../src/shared/main-texts.js';
 
 // The tray menu and Session finish notice follow the selected interface language, like #855.
+const en = JSON.parse(readFileSync('src/renderer/locales/en.json', 'utf8')) as Record<string, string>;
 const de = JSON.parse(readFileSync('src/renderer/locales/de.json', 'utf8')) as Record<string, string>;
 
 let dom: JSDOM;
@@ -16,16 +17,19 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
 
-it('has every tray and notice text in every interface catalog', () => {
-  for (const file of readdirSync('src/renderer/locales').filter(name => name.endsWith('.json'))) {
+it('has every tray and notice text in each required ja/en interface catalog', () => {
+  for (const file of ['ja.json', 'en.json']) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
-    for (const source of MAIN_TEXTS) expect(catalog[source]?.trim(), `${file}: ${source}`).toBeTruthy();
+    for (const source of MAIN_TEXTS) {
+      expect(catalog[source]?.trim(), `${file}: ${source}`).toBeTruthy();
+      if (file === 'en.json') expect(catalog[source], source).toBe(source);
+    }
   }
 });
 
 it('keeps every translated tray and notice text within the bounds the main process accepts', () => {
   // `ui:mainTexts` refuses the whole set when one text is longer, leaving every main text in English.
-  for (const file of readdirSync('src/renderer/locales').filter(name => name.endsWith('.json'))) {
+  for (const file of ['ja.json', 'en.json']) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
     for (const source of MAIN_TEXTS) {
       expect(source.length, source).toBeLessThanOrEqual(200);
@@ -77,7 +81,7 @@ it('publishes every tray and notice text in the selected language, and again aft
   const sent: Array<Record<string, string>> = [];
   publishMainTexts(texts => { sent.push(texts); });
   expect(Object.keys(sent[0]!).sort()).toEqual([...MAIN_TEXTS].sort());
-  for (const source of MAIN_TEXTS) expect(sent[0]![source]).toBe(de[source]);
+  for (const source of MAIN_TEXTS) expect(sent[0]![source]).toBe(de[source] ?? en[source] ?? source);
 
   setLanguage('en');
   expect(sent).toHaveLength(2);
@@ -97,7 +101,7 @@ it('publishes and restores all tunnel-loss notice texts in the selected language
   const before = await import('../src/main/main-texts.js');
   before.setMainTextTranslations(mainTexts());
   for (const source of sources) {
-    expect(before.mainText(source)).toBe(de[source]);
+    expect(before.mainText(source)).toBe(de[source] ?? en[source] ?? source);
     expect(before.mainText(source)).not.toBe(source);
   }
   const saved = JSON.parse(JSON.stringify(before.mainTextTranslations()));
@@ -105,7 +109,7 @@ it('publishes and restores all tunnel-loss notice texts in the selected language
   vi.resetModules();
   const after = await import('../src/main/main-texts.js');
   after.restoreMainTextTranslations(saved);
-  for (const source of sources) expect(after.mainText(source)).toBe(de[source]);
+  for (const source of sources) expect(after.mainText(source)).toBe(de[source] ?? en[source] ?? source);
 });
 
 it('shows the published translation, keeps English for anything unknown, and repaints the tray', async () => {

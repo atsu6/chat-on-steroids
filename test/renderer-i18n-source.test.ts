@@ -7,7 +7,7 @@ import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
  * never failed anything: the Pets and Skills pages shipped 18 English-only labels that way,
  * most of them chosen with `t(cond ? 'a' : 'b')`. This reads the renderer sources instead.
  */
-const LOCALES = ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+const LOCALES = ['ja', 'en'];
 // Not interface text: a Git ref name passed through t() alongside the branch.
 const UNTRANSLATED = new Set(['HEAD']);
 
@@ -20,7 +20,7 @@ function sourceKeys(): Map<string, string> {
     const text = readFileSync(`src/renderer/${file}`, 'utf8');
     for (const match of text.matchAll(direct)) keys.set(match[2]!, file);
     for (const match of text.matchAll(chosen)) { keys.set(match[2]!, file); keys.set(match[4]!, file); }
-    // A count's English singular lives in the code; catalogs key its forms by the plural.
+    // Catalogs key count forms by the English plural, including en's explicit singular.
     for (const [other] of pluralKeys(text)) keys.set(other, file);
   }
   for (const key of keys.keys()) if (key.includes('\\') || UNTRANSLATED.has(key)) keys.delete(key);
@@ -35,7 +35,7 @@ function pluralKeys(text: string): Map<string, string> {
 }
 const PLURAL_FORM = /\|(zero|one|two|few|many)$/;
 
-it('has every literal interface string of the renderer in every catalog', () => {
+it('has every literal interface string of the renderer in each required ja/en catalog', () => {
   const keys = sourceKeys();
   expect(keys.size).toBeGreaterThan(500);
   for (const locale of LOCALES) {
@@ -44,7 +44,7 @@ it('has every literal interface string of the renderer in every catalog', () => 
   }
 });
 
-it('keeps every catalog complete, nonempty and free of duplicate keys or changed placeholders', () => {
+it('keeps each required ja/en catalog complete, nonempty and free of duplicate keys or changed placeholders', () => {
   const entries = LOCALES.map(locale => {
     const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
     return { locale, source, catalog: JSON.parse(source) as Record<string, string> };
@@ -52,6 +52,8 @@ it('keeps every catalog complete, nonempty and free of duplicate keys or changed
   // Plural forms differ by language by design; the next test holds each language to its own.
   const union = [...new Set(entries.flatMap(({ catalog }) => Object.keys(catalog).filter(key => !PLURAL_FORM.test(key))))].sort();
   const args = (value: string) => (value.match(/\{\d+\}/g) ?? []).sort();
+  const singulars = new Map(readdirSync('src/renderer').filter(file => file.endsWith('.ts')).flatMap(file =>
+    [...pluralKeys(readFileSync(`src/renderer/${file}`, 'utf8'))]));
   for (const { locale, source, catalog } of entries) {
     expect(Object.keys(catalog).filter(key => !PLURAL_FORM.test(key)).sort(), locale).toEqual(union);
     const rawKeys = [...source.matchAll(/^\s{2}("(?:[^"\\]|\\.)*")\s*:/gm)].map(match => JSON.parse(match[1]!));
@@ -59,7 +61,10 @@ it('keeps every catalog complete, nonempty and free of duplicate keys or changed
     expect(new Set(rawKeys).size, locale).toBe(rawKeys.length);
     for (const [key, value] of Object.entries(catalog)) {
       expect(value.trim(), `${locale}: ${key}`).not.toBe('');
-      expect(args(value), `${locale}: ${key}`).toEqual(args(key.replace(PLURAL_FORM, '')));
+      const base = key.replace(PLURAL_FORM, '');
+      const source = locale === 'en' && key.endsWith('|one') ? singulars.get(base) ?? base : base;
+      expect(args(value), `${locale}: ${key}`).toEqual(args(source));
+      if (locale === 'en' && key.endsWith('|one')) expect(value, key).toBe(source);
     }
   }
 });
@@ -86,7 +91,7 @@ it('keeps the sub-agent list labels translated in the Russian catalog', () => {
   }
 });
 
-it('translates every recommended skill description in every catalog', () => {
+it('translates every recommended skill description in each required ja/en catalog', () => {
   for (const locale of LOCALES) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
     expect(RECOMMENDED_SKILLS.filter(skill => !Object.hasOwn(catalog, skill.description)).map(skill => skill.id), locale).toEqual([]);

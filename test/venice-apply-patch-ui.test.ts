@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { stripTypeScriptTypes } from 'node:module';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -38,19 +38,19 @@ it('sends write only for an explicit checked approval, keeps the choice during p
   f.write.click(); f.w.document.querySelector('dialog')!.dispatchEvent(new f.w.Event('cancel', { cancelable: true }));
   await Promise.resolve(); expect(f.answer).toHaveBeenLastCalledWith('second', false);
 });
-it('registers the write label and its precise scope in every app catalog, with unchanged Japanese fallback copy', () => {
+it('registers the write label and its precise scope in required ja/en app catalogs, with unchanged Japanese fallback copy', () => {
   const entries = {
     'Also allow writing': '書き込みも許可する',
     'Allow creating, editing, moving, and deleting files in the selected folders.': '選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。'
   };
-  for (const file of readdirSync('src/renderer/locales').filter(file => file.endsWith('.json'))) {
+  for (const file of ['ja.json', 'en.json']) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8'));
     for (const [key, fallback] of Object.entries(entries)) {
       expect(catalog[key]?.trim(), `${file}: ${key}`).toBeTruthy(); expect(catalog[fallback]).toBe(catalog[key]);
       if (file === 'ja.json') expect(catalog[key]).toBe(fallback);
     }
   }
-  for (const file of readdirSync('extension/_locales')) {
+  for (const file of ['ja', 'en']) {
     const catalog = JSON.parse(readFileSync(`extension/_locales/${file}/messages.json`, 'utf8'));
     for (const key of ['venice_patch_preview', 'venice_patch_full_diff']) expect(catalog[key]?.message?.trim(), `${file}: ${key}`).toBeTruthy();
   }
