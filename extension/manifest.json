@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Chat On Venice (dev)",
+  "name": "__MSG_extension_name__",
   "short_name": "CoV dev",
   "version": "2.1.55",
   "description": "__MSG_extension_description__",
@@ -43,24 +43,6 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://venice.ai/*"],
-      "js": ["venice-recon.js", "venice-sse.js", "venice-send.js", "venice-agent.js", "usage.js"],
-      "world": "MAIN",
-      "run_at": "document_start"
-    },
-    {
-      "matches": ["https://venice.ai/*"],
-      "js": ["venice-bridge.js"],
-      "world": "ISOLATED",
-      "run_at": "document_start"
-    },
-    {
-      "matches": ["https://venice.ai/*"],
-      "js": ["venice-panel.js"],
-      "world": "ISOLATED",
-      "run_at": "document_start"
-    },
-    {
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
@@ -96,6 +78,24 @@
         "usage.js"
       ],
       "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://venice.ai/*"],
+      "js": ["venice-recon.js", "venice-sse.js", "venice-send.js", "venice-agent.js", "usage.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://venice.ai/*"],
+      "js": ["venice-bridge.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://venice.ai/*"],
+      "js": ["venice-panel.js"],
+      "world": "ISOLATED",
       "run_at": "document_start"
     }
   ],

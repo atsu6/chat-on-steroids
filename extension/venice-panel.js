@@ -62,8 +62,8 @@
     const host = document.createElement('div');
     host.id = 'cos-venice-panel';
     const shadow = host.attachShadow({mode: 'open'});
-    shadow.innerHTML = `
-      <style>
+    const style = document.createElement('style');
+    style.textContent = `
         :host { all:initial; position:fixed; z-index:2147483647; right:16px; bottom:16px; width:360px; max-width:calc(100vw - 24px); color-scheme:light;
           --vp-bg:#f4f4f5; --vp-field:#fff; --vp-ink:#171717; --vp-muted:#5d5d5d; --vp-line:#d0d0d1; --vp-accent:#486f9d; --vp-on-accent:#fff; --vp-red:#b43b3b; --vp-green:#1f7146;
           font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans JP',sans-serif; color:var(--vp-ink); }
@@ -88,20 +88,32 @@
         :host([data-collapsed]) { width:280px; }
         @media (prefers-color-scheme:dark) { :host { color-scheme:dark; --vp-bg:#181818; --vp-field:#262626; --vp-ink:#fff; --vp-muted:#aeaeae; --vp-line:#3f3f3f; --vp-accent:#b0cbed; --vp-on-accent:#000; --vp-red:#dd6a6a; --vp-green:#75bb97; } }
         @media (max-width:480px) { :host { right:12px; bottom:12px; } button { min-height:44px; } input { height:44px; } }
-      </style>
-      <section aria-label="Chat On Venice 操作パネル">
-        <header><strong>Chat On Venice</strong><span id="state">接続待ち</span><button id="toggle" type="button" aria-expanded="true" aria-controls="body">畳む</button></header>
-        <div id="body">
-          <form>
-            <label for="instruction">指示</label>
-            <textarea id="instruction" rows="3" required placeholder="例：ページを開いて見出しを調べる"></textarea>
-            <div class="controls"><div class="limit"><label for="maxSteps">最大ステップ数</label><input id="maxSteps" type="number" min="1" max="40" step="1" value="10" required></div>
-              <button id="run" type="submit" disabled>実行</button><button id="stop" type="button" disabled>停止</button></div>
-          </form>
-          <div role="log" aria-label="実行ステップ" aria-live="polite"><ol id="steps" tabindex="0" aria-label="実行ステップ一覧"></ol></div>
-          <p id="message" role="status">エージェントに接続しています…</p>
-        </div>
-      </section>`;
+    `;
+    const element = (tag, attributes, ...children) => {
+      const node = document.createElement(tag);
+      for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+      node.append(...children);
+      return node;
+    };
+    const section = element('section', {'aria-label': 'Chat On Venice 操作パネル'},
+      element('header', {},
+        element('strong', {}, 'Chat On Venice'),
+        element('span', {id: 'state'}, '接続待ち'),
+        element('button', {id: 'toggle', type: 'button', 'aria-expanded': 'true', 'aria-controls': 'body'}, '畳む')),
+      element('div', {id: 'body'},
+        element('form', {},
+          element('label', {for: 'instruction'}, '指示'),
+          element('textarea', {id: 'instruction', rows: '3', required: '', placeholder: '例：ページを開いて見出しを調べる'}),
+          element('div', {class: 'controls'},
+            element('div', {class: 'limit'},
+              element('label', {for: 'maxSteps'}, '最大ステップ数'),
+              element('input', {id: 'maxSteps', type: 'number', min: '1', max: '40', step: '1', value: '10', required: ''})),
+            element('button', {id: 'run', type: 'submit', disabled: ''}, '実行'),
+            element('button', {id: 'stop', type: 'button', disabled: ''}, '停止'))),
+        element('div', {role: 'log', 'aria-label': '実行ステップ', 'aria-live': 'polite'},
+          element('ol', {id: 'steps', tabindex: '0', 'aria-label': '実行ステップ一覧'})),
+        element('p', {id: 'message', role: 'status'}, 'エージェントに接続しています…')));
+    shadow.replaceChildren(style, section);
     document.body.appendChild(host);
     ui = Object.fromEntries(['instruction', 'maxSteps', 'run', 'stop', 'steps', 'state', 'message'].map(id => [id, shadow.getElementById(id)]));
     shadow.querySelector('form').addEventListener('submit', event => {
