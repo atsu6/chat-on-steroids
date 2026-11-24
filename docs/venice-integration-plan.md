@@ -10,9 +10,10 @@ readの承認UIを実装し、パネルからのgrant要求・ネイティブフ
 
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
-現在のbridgeはgrant付き `core/read` と、独立したwrite同意を要する `core/apply_patch` を受ける（§12）。shell・Desktopは公開しない。
+現在のbridgeはgrant付き `core/read`、独立したwrite同意を要する `core/apply_patch`（§12）、
+独立したshell同意を要する `core/exec_command`（§13）を受ける。Desktopは公開しない。
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
-初回のread接続は§10–11、今回のapply_patch接続は§12。以降のキューは `venice-progress.md` を参照する。
+初回のread接続は§10–11、apply_patch接続は§12、今回のexec接続は§13。以降のキューは `venice-progress.md` を参照する。
 
 ## 1. agent map の要約（8行）
 
@@ -223,7 +224,8 @@ runTaskのブラウザ専用の直接利用は従来どおり。現在のパネ�
    HTTP受付成功と `isError:false` を区別する。長いshellは既存 `exec_command` のyield/sessionと `write_stdin` を使う。
    HTTPが先に期限に達したら同じcallを照会し、新規実行しない。現行MAIN bridgeの45秒deadlineを無限待ちにしない。
    Stop・脳タブ再読込/別chat遷移・disconnect・app終了はrunを失効させ、次のtool/turnを開始しない。
-   実行済み副作用は戻さず、動作中プロセスは既存session所有権で状態を示す。Stopを無条件killと再定義しない。
+   実行済み副作用は戻さない。2026-11-24の第4段階の指定により、Veniceのshellはそのrunの生存プロセスをkillする（§13）。
+   通常のChatGPT向けStopや、他runのプロセスには適用しない。
 7. **画像をtextへ偽装しない。** 現行 `sendViaUi(text)` と `buildTurn` はtext専用であり、MCP image blockは渡せない。
    画像はapp/ISOLATEDでサイズを制限し、明示許可後にVenice UIの添付として送るmedia adapterを別途設計する。
    image blockはapp/ISOLATEDで扱い、MAINへはtext/structured情報と添付受付の参照を返す。
@@ -380,21 +382,23 @@ Bへ移る判断点は「脳タブ再読込をまたぐtask継続」や「appの
 
 **ボタン:** 「このrunだけ許可」 / 「許可しない」。許可はrun単位とし、全体の権限設定を広げない。
 
-### 将来shellを追加するときの独立した同意
+### shellの独立した同意（第4段階で追加）
 
-初回readの画面ではshellを許可しない。将来追加する際は、ファイル読取とは別の未選択の項目として提示する。
+初回readの既定ではshellを許可しない。第4段階で、ファイル読取・書込とは別の未選択の項目を追加した。
 
-**項目名:** 「コマンド実行を許可する」
+**項目名:** 「コマンドの実行も許可する」
 
-**説明:** 「Veniceは、あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、
-その外のファイルやネットワークにもアクセスできます。既存のコマンド許可ルールも適用されます。」
+**説明:** 「あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。」
+
+既存のコマンド許可ルールも適用する。日本語は上の指定文言をそのままカタログに保持する。
 
 書込は作成・編集・移動・削除を、Desktopは画面画像のVeniceへの送信とマウス・キー操作を別に示す。
 shellの許可を「承認フォルダー内だけの操作」と説明したり、readの許可から自動的に追加したりしない。
 
-**停止時の文言:** 「新しい呼び出しを停止しました。開始済みのコマンドは自動終了しません。」
+**Venice shellの停止:** 第4段階の指定により、runの許可を失効させ、run所有の生存プロセスも終了する。
+初期計画の「開始済みのコマンドは自動終了しません」は、このVenice shellには使わない。
 
-readの見出し・本文・ボタンは§11の承認UIでそのまま使用する。shellの文言は将来用であり、shellは許可しない。
+readの見出し・本文・ボタンは§11の承認UIでそのまま使用する。readまたはwriteの許可だけではshellは有効にならない。
 
 ## 10. core/readの縦接続（2026-11-24実装）
 
@@ -554,7 +558,7 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 既存のMAIN/ISOLATED bridgeと承認・差分の描画を確認する。実測値・完了commitはfindingsとprogressに記録する。
 
 
-## 13. exec_command（2026-11-24 着手）
+## 13. exec_command（2026-11-24 実装）
 
 - ユーザー承認の第4段階。read / writeとは独立した既定OFFのshell同意を追加する。
 - 既存のkernel、exec_commandハンドラ、コマンド許可ルール、UnifiedExecProcessManagerを使う。
@@ -569,3 +573,23 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
   実行中の出力取得は同じgatewayで元のsender / run / callIdを照合する観測のみとする。
 - waitは`yield_time_ms`、既定10,000ms・最大30,000ms。時間切れでkillせずprocessIdを返す。
   `write_stdin`自体の公開は次の第5段階。
+- 入力は単一の`cmd`と任意の`workdir` / `yield_time_ms` / `shell` / `login`。
+  stdoutとstderrを分離するためpipeモードを使い、`tty:true`と`cmds`は拒否する。
+  既存の通常CoSのTTY / batch / 出力形式は変更しない。
+- 戻り値の`structuredContent`は`processId` / `exitCode` / `running` / `stdout` / `stderr` / `output` /
+  `truncated` / `omittedBytes`を含む。完了時も元のprocessIdを保持し、exitCodeを返す。
+  同じcallIdの再取得は初回の確定済み応答を返し、後の終了状態に書き換えない。
+- `{sender, request, output:true}`を同じ`/venice/tools`へ送ると、同一の受理済みexecだけを観測する。
+  read/writeや新規execを実行せず、stdinも送らない。現在のgrant、sender、run、callId、tool、argsを全て照合する。
+  通常のexec戻り値と同じ全体/プロジェクト設定のsecrets shieldを通し、maskが文字数を増やしても64KiBに収める。
+  MAINは250ms間隔で重複なしに観測し、パネルのステップへtextContentで表示する。
+  yield後・モデルのdone後も生存プロセスは観測を続け、Stopまたは新規runで観測を止める。
+- spawn待ちも3本の枠に含め、spawn直後の生存期間・出力コールバックでrunに所有させる。
+  killは既存のプロセスツリー終了を使う。StopのHTTP応答とapp終了は終了処理を待つ。
+- 第5段階ではこのrun所有者とprocessIdを使って継続操作を接続する。
+  現行pipeは既存managerのstdin-closed契約を保つため、空入力pollと非空入力の扱いを区別して設計・検証する。
+
+検証は実Venice送信なし。`test/venice-exec.test.ts`は実kernel・実プロセス・一時フォルダー・認証HTTP、
+`test/venice-exec-ui.test.ts`は承認状態と全カタログ、`test/venice-exec-panel.test.ts`はMAIN / ISOLATEDの合成経路を使う。
+`node test/venice-exec.visual.cjs`はネットワークを全てローカル応答/abortにして、既存CSS / i18nの承認画面、
+分離出力、改行、横スクロール、省略、完了後の継続観測、Stop、日本語/ドイツ語、PC/モバイル、axeを確認する。
