@@ -4119,7 +4119,7 @@
   "書き込みも許可する": "Auch Schreiben erlauben",
   "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Erlaube das Erstellen, Bearbeiten, Verschieben und Löschen von Dateien in den ausgewählten Ordnern.",
   "Also allow running commands": "Auch das Ausführen von Befehlen erlauben",
-  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice kann Befehle mit Ihren Berechtigungen ausführen. Die Befehle sind nicht auf die ausgewählten Ordner beschränkt und können auch auf Dateien und das Netzwerk außerhalb dieser Ordner zugreifen.",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice kann Befehle mit deinen Berechtigungen ausführen. Die Befehle sind nicht auf die ausgewählten Ordner beschränkt und können auch auf Dateien und das Netzwerk außerhalb dieser Ordner zugreifen.",
   "コマンドの実行も許可する": "Auch das Ausführen von Befehlen erlauben",
-  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice kann Befehle mit Ihren Berechtigungen ausführen. Die Befehle sind nicht auf die ausgewählten Ordner beschränkt und können auch auf Dateien und das Netzwerk außerhalb dieser Ordner zugreifen."
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice kann Befehle mit deinen Berechtigungen ausführen. Die Befehle sind nicht auf die ausgewählten Ordner beschränkt und können auch auf Dateien und das Netzwerk außerhalb dieser Ordner zugreifen."
 }
