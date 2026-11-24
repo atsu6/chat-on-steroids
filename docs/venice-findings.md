@@ -1259,3 +1259,60 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 ### 次に確認したいこと
 
 - 今回の指定8本と全体テストの回帰修正は完了。progressのタスクには進んでいない。
+
+
+## 2026-11-24 — core/apply_patchと独立write scope
+
+### 分かったこと
+
+- `/Users/atsu/chat-on-venice` でNode `22.23.5` を確認してから、`d548d00e` を基点に
+  `codex/venice-apply-patch` を作成した。キューは `venice-progress.md` に0〜11の順で保存した。
+- read grantの値と既定は維持した。appの承認画面で「書き込みも許可する」を明示チェックした場合だけ、
+  mainが `write:true` と `core/apply_patch` のallowlistを保存する。ページからwriteを自己申告する入口は追加していない。
+  チェックは未選択が既定で、別の承認要求へ持ち越さない。shell・Desktopの権限は含めない。
+- `/venice/tools` → host-admitted kernel → 既存apply_patch handlerの接続を追加した。
+  callIdの受付前予約・永続化・重複join・結果cache・unknownの再実行拒否は既存のまま。
+  実ファイルの成功と、sessionへのhost_admitted記録1件、同一要求の再取得、失効後の新規拒否を確認した。
+- パッチの基準はgrantの最初のroot。全対象とmove先を同じsandboxでcanonical化し、
+  global configにあってもgrant外のroot、native/virtual path、traversal、外向きsymlinkを拒否した。
+  root内の作成・更新・移動・削除、同じpathの連続操作も既存patch engineで成功した。
+  native picker相当で選んだglobal config外のrun専用rootでも成功し、全体rootsは変更されなかった。
+- read-onlyと個別create/edit/move/delete capabilityを保った。
+  checkpointを待っている間の失効・Read-only化も、本適用直前の再検証で拒否され、ファイルは作られなかった。
+- プレビューは同じgatewayの `{preview:true}` で受け、同じgrant・sender・root・schemaの検証を通す。
+  write/remove/mkdirをメモリoverlayに向けた既存patch engineからunified diffを生成する。
+  プレビュー時に実ファイル・checkpoint・canonical実行記録は作らず、read capabilityとshieldも適用する。
+  プレビュー取得後の本適用は同一callId・tool・argsで送り、そこで既存の受付ledgerを使う。
+- パネルは差分をtextContentで実行ステップ欄へ挿入し、自動の表示通知後に本適用する。
+  長い差分は先頭8行・最大1,200文字と未展開の全文detailsに分けた。適用ごとの確認ボタンは増やしていない。
+  展開、横スクロール、キーボードfocusを確認し、最初のaxe確認で見つかったスクロール領域のfocus不足を修正した。
+- writeの2つの文言を全12アプリカタログに、差分の2つのラベルを全13拡張カタログに追加した。
+  既存の翻訳キー・値と、read承認の日本語文言は維持した。
+- 追加テストは3ファイル・15件で、指定の未許可拒否、root外拒否、root内成功、同一callId、失効、差分の生成・折り畳み、
+  全カタログ登録を含む。既存テストの変更・削除・skip追加・assert変更はない。
+- 関連6ファイルの295テスト、既存agent/bridge/panel/read/grantの53テストが成功した。
+  headless Chromeで既存MAIN/ISOLATED bridge、承認の既定readと明示write、日本語・ドイツ語、
+  適用前のsafe text表示、全文の折り畳み、1280px/light・390px/dark、axe違反0件を確認した。
+  モデル応答は合成で、全リクエストをローカル応答またはabortにし、実Venice送信は0回。通信record numberはない。
+- 全体 `npm test` は**1回だけ**実行し、終了コード1、690.03秒。
+  **515ファイル成功 / 1失敗 / 20スキップ、12,776テスト成功 / 1失敗 / 218スキップ**だった。
+  追加15テストは全件成功。失敗は既存 `codex-runtime-parity.test.ts:571` のPTYケースのみ。
+  terminateProcess自体のassertは通り、最初のexec応答がprocessId:nullでなくPIDだったため、子プロセス終了のassert前に失敗した。
+- そのファイルだけを単独再実行すると、終了コード0、**19成功 / 3スキップ**だった。
+  当該テストと、それが直接使うunified-exec / shellの実装はこのブランチで変更していない。
+- 最終の `npm run typecheck` と `npm run build` はともに終了コード0。
+  ソース実装は `c3137481`、承認UI・パネル・i18n・画面チェックは `063e6cb9` にローカルcommitした。
+  ログ・画面はGit除外の `outputs/venice-apply-patch/` に保存した。push・実Venice送信・アプリ再起動操作はしていない。
+
+### 不明なこと
+
+- 全体実行時だけ出たPTYの応答差の原因は未確定。並列負荷下のタイミング依存が疑われるが、全体グリーンは確認できていない。
+- 差分は表示時点のsnapshotで、別プロセスへの編集lockは取らない。本適用時に既存patch検証をやり直す。
+  プレビューのUTF-8上限は1,000,000 bytesで、超過は明示拒否する。全文を黙って切り詰めて適用しない。
+- この段階では実Veniceモデルによるwrite E2Eは実施していない。ユーザー指定の合成・headless検証まで。
+
+### 次に確認したいこと
+
+- 実装と個別検証は済んだが、必須の全体テストに1失敗があるためprogressの3は**保留**にした。
+  ユーザーによる追加全体実行の許可、または当該失敗の扱いの判断が必要。既存exec処理をこのタスクで変更して埋め合わせない。
+  4以降には着手していない。
