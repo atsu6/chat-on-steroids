@@ -79,3 +79,14 @@ senderは同じrecordの差分を連結して `venice-sse.js` で解析する。
 - 今回修正したsenderによる実UI送信の成立と、実アカウントでの応答取得。
 
 今回の検証は合成DOM・合成通信・仮想時計のみ。実送信は行わない。
+
+## 2026-11-24: attestation輸送の追加要求と保留
+
+ユーザーから、旧停止判断を上書きし、attestation付きfetchを優先する追加輸送を採用する要求を受けた。
+参考の[PROTOCOL.md §1・§2](https://github.com/CanArslanDev/opencode-venice-web/blob/main/docs/PROTOCOL.md)は確認した。
+同文書の稼働報告は、Veniceによる自動アクセスの許可を示す資料ではない。
+
+プログラム利用を拒否した403に対して、認証・attestationを再現して通す輸送と、
+401/403後の別経路への自動再送は保留。実装・実送信は行っていない。
+送信方式と独立したNUL除去と応答形式の1回再試行のみ`1ee5c67a`で追加した。
+現状と送信しない確認方法は`docs/venice-attestation-status.md`を参照する。
