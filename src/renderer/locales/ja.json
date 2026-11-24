@@ -4020,5 +4020,9 @@
   "Also allow writing": "書き込みも許可する",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。",
   "書き込みも許可する": "書き込みも許可する",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。"
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。",
+  "Also allow running commands": "コマンドの実行も許可する",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。",
+  "コマンドの実行も許可する": "コマンドの実行も許可する",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。"
 }

@@ -4020,5 +4020,9 @@
   "Also allow writing": "Cho phép cả thao tác ghi",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "Cho phép tạo, sửa, di chuyển và xóa tệp trong các thư mục đã chọn.",
   "書き込みも許可する": "Cho phép cả thao tác ghi",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Cho phép tạo, sửa, di chuyển và xóa tệp trong các thư mục đã chọn."
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Cho phép tạo, sửa, di chuyển và xóa tệp trong các thư mục đã chọn.",
+  "Also allow running commands": "Cho phép cả việc chạy lệnh",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice có thể chạy lệnh với quyền của bạn. Các lệnh không bị cô lập trong những thư mục đã chọn và cũng có thể truy cập tệp và mạng bên ngoài các thư mục đó.",
+  "コマンドの実行も許可する": "Cho phép cả việc chạy lệnh",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice có thể chạy lệnh với quyền của bạn. Các lệnh không bị cô lập trong những thư mục đã chọn và cũng có thể truy cập tệp và mạng bên ngoài các thư mục đó."
 }

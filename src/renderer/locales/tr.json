@@ -4104,5 +4104,9 @@
   "Also allow writing": "Yazmaya da izin ver",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "Seçilen klasörlerde dosya oluşturmaya, düzenlemeye, taşımaya ve silmeye izin ver.",
   "書き込みも許可する": "Yazmaya da izin ver",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Seçilen klasörlerde dosya oluşturmaya, düzenlemeye, taşımaya ve silmeye izin ver."
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Seçilen klasörlerde dosya oluşturmaya, düzenlemeye, taşımaya ve silmeye izin ver.",
+  "Also allow running commands": "Komut çalıştırmaya da izin ver",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice, sizin yetkilerinizle komut çalıştırabilir. Komutlar seçilen klasörlerle sınırlı değildir; bu klasörlerin dışındaki dosyalara ve ağa da erişebilir.",
+  "コマンドの実行も許可する": "Komut çalıştırmaya da izin ver",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice, sizin yetkilerinizle komut çalıştırabilir. Komutlar seçilen klasörlerle sınırlı değildir; bu klasörlerin dışındaki dosyalara ve ağa da erişebilir."
 }

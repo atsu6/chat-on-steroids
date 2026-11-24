@@ -4,6 +4,7 @@ const CONTRACT = `あなたは作業用タブのDOMを操作するエージェ�
 利用可能なツール:
 core/read({paths, start_line?, end_line?, max_bytes?}) -> appで許可したroot内のファイルを読む。appのgrantが必要
 core/apply_patch({patch}) -> appで書き込みを別途許可したroot内だけを変更。*** Begin Patch / *** Add File: path / +行 / *** Update File: path / *** Move to: path / @@ / -旧行 / +新行 / *** Delete File: path / *** End Patch 形式。shell実行はできない
+core/exec_command({cmd, workdir?, yield_time_ms?, shell?, login?}) -> 独立したshell許可が必要。cwdは許可root内。既定10秒・最大30秒で待ち、processId・exitCode・stdout/stderr出力を返す。出力は64KiBまで。生存processIdは次段階のwrite_stdin用（まだ利用不可）。同時3本まで。Stopでrunのプロセスを終了
 now() -> 現在時刻のISO文字列
 tab_open({url}) -> 作業用タブを作成または指定URLへ遷移してURLを返す。DOMツールの前に実行する
 query({selector}) -> 件数と最大20件の番号・tagName・id・クラス先頭・テキスト先頭40文字
@@ -59,6 +60,7 @@ function createAgent(sendViaUi) {
     const requested = options.maxSteps ?? 10;
     if (!Number.isInteger(requested) || requested < 1) throw new TypeError('maxSteps must be a positive integer');
     if (options.onStep !== undefined && typeof options.onStep !== 'function') throw new TypeError('onStep must be a function');
+    if (options.onExecOutput !== undefined && typeof options.onExecOutput !== 'function') throw new TypeError('onExecOutput must be a function');
     if (options.onPatchPreview !== undefined && typeof options.onPatchPreview !== 'function') throw new TypeError('onPatchPreview must be a function');
     if (taskState) throw new Error('タスクは既に実行中です。');
     const maxSteps = Math.min(requested, 40), steps = [];
@@ -87,7 +89,8 @@ function createAgent(sendViaUi) {
           return {summary: lastAction.summary, steps};
         }
         try {
-          previous = await executeTool(lastAction.name, lastAction.args, {onPatchPreview: options.onPatchPreview && (async diff => {
+          const index = steps.length + 1;
+          previous = await executeTool(lastAction.name, lastAction.args, {onExecOutput: options.onExecOutput && (output => options.onExecOutput({index, output})), onPatchPreview: options.onPatchPreview && (async diff => {
             await options.onPatchPreview({index: steps.length + 1, diff}); checkRunning();
           })});
         } catch (error) {
@@ -134,14 +137,35 @@ function callVeniceBridge(op, args = {}) {
 }
 
 // A transport retry reuses the callId. An unknown outcome never starts another effect.
-async function callLocalTool(tool, args = {}, beforeApply) {
+const execObservers = new Set();
+function stopExecObservers() { for (const observer of execObservers) observer.cancelled = true; execObservers.clear(); }
+
+async function callLocalTool(tool, args = {}, beforeApply, onExecOutput) {
   const request = {callId: crypto.randomUUID(), surface: 'core', tool, args};
   if (tool === 'apply_patch' && beforeApply) {
     const preview = await callVeniceBridge('previewPatch', request);
     if (typeof preview?.diff !== 'string') throw new Error('Invalid patch preview');
     await beforeApply(preview.diff);
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let settled = false, latest = null;
+  const observer = {cancelled: false};
+  if (tool === 'exec_command' && onExecOutput) {
+    execObservers.add(observer);
+    void (async () => {
+      try {
+        while (!observer.cancelled) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          if (observer.cancelled) break;
+          const reply = await callVeniceBridge('execOutput', request);
+          if (observer.cancelled) break;
+          if (reply?.output) { latest = reply.output; onExecOutput(latest); }
+          if (settled && !latest?.running) break;
+        }
+      } catch (error) { if (!observer.cancelled) onExecOutput({callId: request.callId, observationError: error.message}); }
+      finally { execObservers.delete(observer); }
+    })();
+  }
+  try { for (let attempt = 0; attempt < 2; attempt++) {
     let response;
     try { response = await callVeniceBridge('localTool', request); }
     catch (error) { if (attempt === 0) continue; throw new Error(`${error.message} (callId=${request.callId})`); }
@@ -151,13 +175,17 @@ async function callLocalTool(tool, args = {}, beforeApply) {
       throw new Error(`${response.error || response.state || 'unknown'} (callId=${request.callId})`);
     }
     if (response.result?.isError) throw new Error(response.result.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || `Local ${tool} failed`);
+    if (tool === 'exec_command' && response.result?.structuredContent) {
+      latest = response.result.structuredContent; onExecOutput?.(latest);
+    }
     return response.result;
-  }
+  } } finally { settled = true; }
 }
 
 const TOOL_REGISTRY = Object.freeze({
   'core/read': args => callLocalTool('read', args),
   'core/apply_patch': (args, beforeApply) => callLocalTool('apply_patch', args, beforeApply),
+  'core/exec_command': (args, _beforeApply, onOutput) => callLocalTool('exec_command', args, undefined, onOutput),
   now: () => new Date().toISOString(),
   tab_open: async ({url} = {}) => (await callVeniceBridge('ensureTab', {url})).url,
   query: (args = {}) => callVeniceBridge('eval', {name: 'query', args}),
@@ -173,7 +201,7 @@ const TOOL_REGISTRY = Object.freeze({
 async function executeTool(name, args, options = {}) {
   if (!Object.hasOwn(TOOL_REGISTRY, name)) throw new Error('未登録のツール: ' + name);
   try {
-    return {ok: true, result: await TOOL_REGISTRY[name](args, options.onPatchPreview)};
+    return {ok: true, result: await TOOL_REGISTRY[name](args, options.onPatchPreview, options.onExecOutput)};
   } catch (error) {
     return {ok: false, error: error.message};
   }
@@ -186,7 +214,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
     localIdentity: () => callVeniceBridge('localIdentity'),
     setLocalRun: runId => callVeniceBridge('setLocalRun', {runId}),
     requestGrant: instructionSummary => callVeniceBridge('requestGrant', {instructionSummary}),
-    revokeLocal: () => callVeniceBridge('revokeLocal')
+    revokeLocal: () => { stopExecObservers(); return callVeniceBridge('revokeLocal'); }
   });
   const origin = 'https://venice.ai';
   let panelTask = null, retainedGrant = null;
@@ -205,6 +233,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
     if (message.op === 'stop') {
       if (message.id !== panelTask?.id && message.id !== retainedGrant?.id) return;
       if (panelTask) { panelTask.cancelled = true; panelTask.preview?.reject(new Error('Patch preview stopped')); window.__cosVeniceAgent.stopTask(); }
+      stopExecObservers();
       postPanel(message.id, 'stopping');
       void callVeniceBridge('revokeLocal').then(() => postPanel(message.id, 'revoked'),
         error => postPanel(message.id, 'error', {error:error.message}));
@@ -219,6 +248,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
     panelTask = state;
     postPanel(message.id, 'awaiting');
     void (async () => {
+      stopExecObservers();
       const grant = await callVeniceBridge('requestGrant', {instructionSummary:message.instruction.slice(0,1000)});
       if (state.cancelled) { await callVeniceBridge('revokeLocal'); throw Object.assign(new Error('タスクを停止しました。'),{code:'VENICE_TASK_STOPPED'}); }
       retainedGrant = {id:message.id,runId:grant.runId};
@@ -227,6 +257,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
       return window.__cosVeniceAgent.runTask(message.instruction, {
         maxSteps: message.maxSteps,
         onStep: (step, preview) => postPanel(message.id, 'step', {step, preview}),
+        onExecOutput: event => { if (!state.cancelled) postPanel(message.id, 'exec-output', event); },
         onPatchPreview: preview => new Promise((resolve, reject) => {
           const id = crypto.randomUUID();
           const finish = error => { clearTimeout(timer); state.preview = null; if (error) reject(error); else resolve(); };

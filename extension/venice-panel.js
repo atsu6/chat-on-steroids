@@ -35,6 +35,28 @@
       ui.state.textContent = '停止待ち';
       message('現在の処理が終わるのを待っています。');
     }
+    if (data.event === 'exec-output') {
+      const out = data.output;
+      if (!Number.isInteger(data.index) || data.index < 1 || data.index > 40 || !out || typeof out.callId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(out.callId)) return;
+      let row = [...ui.steps.querySelectorAll('.exec-output')].find(node => node.dataset.callId === out.callId);
+      if (!row) {
+        row = document.createElement('li'); row.className = 'exec-output'; row.dataset.callId = out.callId;
+        const title = document.createElement('div'); title.className = 'exec-title'; row.append(title);
+        for (const stream of ['stdout', 'stderr']) {
+          const label = document.createElement('div'), pre = document.createElement('pre'); label.textContent = stream;
+          pre.dataset.stream = stream; pre.tabIndex = 0; pre.setAttribute('aria-label', stream); row.append(label, pre);
+        }
+        const notice = document.createElement('div'); notice.className = 'exec-notice'; row.append(notice); ui.steps.append(row);
+      }
+      if (typeof out.observationError === 'string') {
+        row.querySelector('.exec-notice').textContent = t('venice_exec_output_error', '出力を取得できませんでした。停止ボタンでrunを終了できます。'); return;
+      }
+      if (typeof out.stdout !== 'string' || typeof out.stderr !== 'string' || out.stdout.length + out.stderr.length > 65536) return;
+      row.querySelector('.exec-title').textContent = `${String(data.index).padStart(2, '0')} / core/exec_command / processId:${out.processId ?? '—'} / ${out.running ? t('venice_exec_running', '実行中') : `exitCode:${out.exitCode ?? '—'}`}`;
+      for (const stream of ['stdout', 'stderr']) row.querySelector(`[data-stream=${stream}]`).textContent = out[stream];
+      row.querySelector('.exec-notice').textContent = out.truncated ? t('venice_exec_output_omitted', '省略：出力は先頭64KBまで表示します。') : '';
+      ui.steps.scrollTop = ui.steps.scrollHeight; return;
+    }
     if (data.event === 'patch-preview') {
       if (!Number.isInteger(data.index) || data.index < 1 || data.index > 40 || typeof data.diff !== 'string' ||
           data.diff.length > 1_000_000 || typeof data.previewId !== 'string') return;
@@ -109,10 +131,13 @@
         ol { list-style:none; padding:0; margin:12px 0 0; max-height:160px; overflow:auto; border-top:1px solid var(--vp-line); }
         ol:empty { display:none; } li { padding:7px 0; font:13px/1.6 ui-monospace,'SF Mono',monospace; white-space:nowrap; min-width:max-content; }
         li[data-ok=false] { color:var(--vp-red); } li[data-ok=true] { color:var(--vp-green); }
-        ol:has(.patch-preview) { max-height:280px; }
+        ol:has(.patch-preview, .exec-output) { max-height:280px; }
         ol:has(details[open]) { max-height:min(400px,45dvh); }
-        li.patch-preview { white-space:normal; min-width:0; color:var(--vp-ink); }
-        .patch-preview pre { margin:8px 0; max-height:280px; overflow:auto; white-space:pre; font:12px/1.6 ui-monospace,'SF Mono',monospace; }
+        li.patch-preview, li.exec-output { white-space:normal; min-width:0; color:var(--vp-ink); }
+        .patch-preview pre, .exec-output pre { margin:8px 0; max-height:280px; overflow:auto; white-space:pre; font:12px/1.6 ui-monospace,'SF Mono',monospace; }
+        .exec-output [data-stream=stderr], .exec-notice { color:var(--vp-red); }
+        .exec-output pre:empty { display:none; }
+        .exec-title { overflow-wrap:anywhere; }
         .patch-preview summary { cursor:pointer; min-height:28px; color:var(--vp-muted); }
         #message { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; max-height:140px; overflow:auto; margin:12px 0 0; }
         :host([data-collapsed]) { width:280px; }
