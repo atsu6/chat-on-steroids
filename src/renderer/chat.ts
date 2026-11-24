@@ -10298,7 +10298,7 @@ export function initVeniceGrantDialog(): void {
     current = next;
     if (!next) { if (dialog.open) dialog.close(); return; }
     document.getElementById('veniceGrantSession')!.textContent = `${next.sessionTitle} · ${next.sessionId}`;
-    document.getElementById('veniceGrantProject')!.textContent = next.project ? `${next.project.name} · ${next.project.id}` : '未割り当て';
+    document.getElementById('veniceGrantProject')!.textContent = next.project ? `${next.project.name} · ${next.project.id}` : document.getElementById('veniceGrantUnassigned')!.textContent;
     document.getElementById('veniceGrantTab')!.textContent = `${next.tab.url} · tab ${next.tab.id}`;
     document.getElementById('veniceGrantInstruction')!.textContent = next.instructionSummary;
     const roots = document.getElementById('veniceGrantRoots')!;
@@ -10318,7 +10318,7 @@ export function initVeniceGrantDialog(): void {
       if (!reply.ok && current?.id === id) { error.textContent = reply.error; error.hidden = false; }
       if (kind === 'pick' && reply.ok) paint(reply.data as VeniceGrantPending[]);
     } catch {
-      if (current?.id === id) { error.textContent = '承認操作を完了できませんでした。'; error.hidden = false; }
+      if (current?.id === id) { error.textContent = document.getElementById('veniceGrantActionError')!.textContent; error.hidden = false; }
     } finally { if (current?.id === id) { busy = false; sync(); } }
   };
   pick.addEventListener('click', () => void act('pick'));
@@ -10326,7 +10326,7 @@ export function initVeniceGrantDialog(): void {
   deny.addEventListener('click', () => void act('deny'));
   dialog.addEventListener('cancel', event => { event.preventDefault(); void act('deny'); });
   api.onVeniceGrantPending?.(paint);
-  void api.veniceGrantPending?.().then(reply => { if (reply.ok) paint(reply.data); });
+  void api.veniceGrantPending?.().then(reply => { if (reply.ok && Array.isArray(reply.data)) paint(reply.data); });
 }
 
 export function initChat(next: Deps): void {

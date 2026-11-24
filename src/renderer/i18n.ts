@@ -162,11 +162,16 @@ function syncLanguageControls(): void {
 
 /** Run once on the static shell, before any user/provider content is inserted. */
 export function initLanguage(): void {
+  // Explicit source keys let a native form keep its standalone fallback copy.
+  for (const node of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+    const source = node.dataset.i18n!;
+    ui(node, 'textContent', () => t(source));
+  }
   const walker = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */);
   const texts: Text[] = [];
   while (walker.nextNode()) texts.push(walker.currentNode as Text);
   for (const node of texts) {
-    if (node.parentElement?.closest('script, style, svg, code, kbd, textarea, [translate="no"]')) continue;
+    if (node.parentElement?.closest('script, style, svg, code, kbd, textarea, [translate="no"], [data-i18n]')) continue;
     const source = node.data;
     const key = source.replace(/\s+/g, ' ').trim();
     if (sourceKeys.has(key)) ui(node, 'textContent', () => source.replace(/\S[\s\S]*\S|\S/, t(key)));
