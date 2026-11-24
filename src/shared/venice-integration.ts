@@ -72,7 +72,7 @@ export interface VeniceGrantPending {
   sessionTitle: string;
   project: { id: string; name: string } | null;
   tab: { id: number; url: string };
-  tools: ['core/read'];
+  tools: ['core/read'] | ['core/read', 'core/find'];
   instructionSummary: string;
   roots: string[];
 }
@@ -89,4 +89,14 @@ export interface VeniceExecOutput {
   stderr: string;
   truncated: boolean;
   omittedBytes: number;
+}
+
+
+export interface VeniceFindResult {
+  matches: Array<{ path: string; line?: number; text?: string }>;
+  count: number;
+  limit: number;
+  truncated: boolean;
+  stoppedBecause: string[];
+  binaryPolicy: 'skip' | 'names-only';
 }
