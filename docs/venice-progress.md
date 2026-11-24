@@ -1,6 +1,6 @@
 # Venice 移植キュー
 
-0〜3は完了。次は **4: exec_command**。今回の更新は3の完了記録のみで、4以降は未着手。
+0〜3は完了。今回の作業は **4: exec_command**。5以降は未着手。
 
 | 状態（番号・項目） | 根拠commit | 残作業 |
 | --- | --- | --- |
@@ -8,7 +8,7 @@
 | 1. agent契約とDOMツール — 完了 | `f9572fcd`, `72616f62`, `2e1a37ba` | なし |
 | 2. Electron read E2E — 完了 | `26188ebf`, `d2e9c4c6` | なし |
 | 3. apply_patch — 完了 | `c3137481`, `063e6cb9` | なし（全体 516 passed / 0 failed） |
-| 4. exec_command — 未着手 | — | 独立したshell同意と実行接続 |
+| 4. exec_command — 進行中 | — | 独立したshell同意と実行接続 |
 | 5. write_stdin — 未着手 | — | 実行所有者とstdin/poll接続 |
 | 6. find — 未着手 | — | 検索接続 |
 | 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
@@ -18,7 +18,7 @@
 | 11. 総回帰 — 未着手 | — | 全機能が揃った時点での総回帰 |
 
 実送信の証拠と各段階の条件は `venice-findings.md` と `venice-integration-plan.md` を参照。
-今回の3はユーザー指定に従って実Venice送信なしで検証する。shell・Desktopの権限は追加しない。
+3および今回の4はユーザー指定に従って実Venice送信なしで検証する。4は独立したshell同意を追加し、Desktopは追加しない。
 
 ## 3の検証状況
 
@@ -28,4 +28,4 @@
 - 初回の既存PTYテスト1件の失敗は、全体再実行と単独実行で再現せず、フレークと判断。
   `test/unified-exec-output-stream.test.ts` の単独実行も成功している（ユーザー確認済み）。
   テストとexec実装は変更していない。
-- 3のapply_patchは完了。次は4のexec_commandで、今回は着手していない。
+- 3のapply_patchは完了。今回の4の着手前ベースライン。
