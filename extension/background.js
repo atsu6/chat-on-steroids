@@ -5779,10 +5779,16 @@ async function revokeVeniceGrant(tabId, documentId = null) {
   if (!reply.ok) throw new Error('runの失効を確認できませんでした。');
   return Boolean(reply.data?.revoked);
 }
-chrome.tabs.onUpdated.addListener((id, change) => {
-  if (change.status === 'loading' || change.url) void revokeVeniceGrant(id).catch(() => {});
-});
-chrome.tabs.onRemoved.addListener(id => { void revokeVeniceGrant(id).catch(() => {}); });
+// Bootstrap follows the ChatGPT listeners; standalone bridge use shares the same registration.
+let veniceGrantLifecycleStarted = false;
+function startVeniceGrantLifecycle() {
+  if (veniceGrantLifecycleStarted) return;
+  veniceGrantLifecycleStarted = true;
+  chrome.tabs.onUpdated.addListener((id, change) => {
+    if (change.status === 'loading' || change.url) void revokeVeniceGrant(id).catch(() => {});
+  });
+  chrome.tabs.onRemoved.addListener(id => { void revokeVeniceGrant(id).catch(() => {}); });
+}
 
 async function handleVeniceBridge(message, sender) {
   // Never infer authority from message fields supplied by the page.
@@ -5791,6 +5797,7 @@ async function handleVeniceBridge(message, sender) {
       !isVeniceBridgeUrl(sender.url)) {
     return {ok: false, error: 'Venice bridge sender is not authorized'};
   }
+  startVeniceGrantLifecycle();
   if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument'].includes(message.op)) {
     if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
     const brain = await chrome.tabs.get(sender.tab.id);
@@ -6958,3 +6965,5 @@ void load()
   .catch(() => undefined)
   .then(() => reportPresence())
   .then(() => scheduleRetry());
+
+startVeniceGrantLifecycle();
