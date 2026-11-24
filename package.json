@@ -96,5 +96,8 @@
     "@anthropic-ai/mcpb": {
       "tmp": "0.2.7"
     }
+  },
+  "volta": {
+    "node": "22.23.5"
   }
 }
