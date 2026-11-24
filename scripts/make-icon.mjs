@@ -385,11 +385,25 @@ mkdirSync(reviewDir, { recursive: true });
 const ferroMask = Uint8Array.from(visibleSource, (visible, index) =>
   visible && source.pixels[index * 4] >= 128 ? 1 : 0);
 const ferroCrop = sourceCrop(ferroMask);
+// At 16 logical pixels, area-resampling alone merges the six teeth. Hint the tray
+// silhouette to the pixel grid: six one-pixel teeth with one-pixel gaps, a curved
+// crest, rear blade and turned foot. Retina doubles this same grid, not its blur.
+function trayTemplate(size) {
+  if (size !== 16 && size !== 32) return render(size, ferroMask, ferroCrop);
+  const rows = [[10, 12], [8, 11], [6, 10], [7, 10], [4, 10], [8, 10],
+    [4, 13], [8, 10], [4, 10], [8, 10], [4, 9], [8, 9], [4, 9], [7, 9], [4, 8], [6, 7]];
+  const scale = size / 16, pixels = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const [left, right] = rows[Math.floor(y / scale)];
+    for (let x = left * scale; x < (right + 1) * scale; x++) pixels.fill(255, (y * size + x) * 4, (y * size + x + 1) * 4);
+  }
+  return pixels;
+}
 for (const size of REVIEW_SIZES) {
   writeFileSync(path.join(reviewDir, `icon${size}.png`), pngFor(size));
-  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), encodePng(size, render(size, ferroMask, ferroCrop)));
+  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), encodePng(size, trayTemplate(size)));
 }
 for (const [size, filename] of [[16, 'trayTemplate.png'], [32, 'trayTemplate@2x.png']]) {
-  writeFileSync(path.join(root, 'artwork', filename), encodePng(size, render(size, ferroMask, ferroCrop)));
+  writeFileSync(path.join(root, 'artwork', filename), encodePng(size, trayTemplate(size)));
 }
 console.log(`Wrote build/icons/icon{${REVIEW_SIZES.join(',')}}.png, ferro-template variants and artwork/trayTemplate{,@2x}.png`);

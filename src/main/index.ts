@@ -425,7 +425,7 @@ function refreshTray(): void {
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`${mainText(appBrand.displayName)} — ${label}`);
+  tray.setToolTip(mainText(appBrand.displayName));
   const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -502,7 +502,9 @@ void app.whenReady().then(async () => {
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
+  logInfo(`branding: userData before=${JSON.stringify(userData)}; ready=${app.isReady()}; packaged=${app.isPackaged}`);
   refreshNativeBrand(window);
+  logInfo(`branding: userData after=${JSON.stringify(app.getPath('userData'))}; unchanged=${userData === app.getPath('userData')}`);
   onMainTextsChange(() => refreshNativeBrand(window));
   // Display-only branding: never setName(), appId or userData for this development fork.
   if (appBrand.development && process.platform === 'darwin') {
@@ -872,6 +874,10 @@ void app.whenReady().then(async () => {
   tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
   tray.on('click', windowActivation.request);
   refreshTray();
+  // Electron 44 exposes setToolTip only. Record the actual capability and setter value;
+  // do not mistake this diagnostic for a native getter result.
+  const getToolTip = (tray as Tray & { getToolTip?: () => string }).getToolTip;
+  logInfo(`branding: tray.getToolTip=${typeof getToolTip === 'function' ? JSON.stringify(getToolTip.call(tray)) : 'unavailable'}; configured=${JSON.stringify(mainText(appBrand.displayName))}`);
   onStatusChange(refreshTray);
   // The built-in browser's own hooks live in its module, which loads only once it is selected.
   onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });

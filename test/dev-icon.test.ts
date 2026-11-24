@@ -54,4 +54,8 @@ it('generates every review size, Retina tray templates and all existing icon out
   }
   expect(visible).toBeGreaterThan(30);
   expect(transparent).toBeGreaterThan(30);
+  for (let y = 4; y <= 14; y += 2) {
+    expect(pixels[y * 65 + 1 + 4 * 4 + 3], `tooth at ${y}`).toBe(255);
+    expect(pixels[(y + 1) * 65 + 1 + 4 * 4 + 3], `gap after ${y}`).toBe(0);
+  }
 });

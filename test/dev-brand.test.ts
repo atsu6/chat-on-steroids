@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { load as loadYaml } from 'js-yaml';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MAIN_TEXTS } from '../src/shared/main-texts.js';
 
@@ -82,21 +83,30 @@ it.each([false, true])('main selects the packaged=%s name for native About, wind
   } else expect(native.Menu.setApplicationMenu).not.toHaveBeenCalled();
   const source = read('src/main/index.ts');
   expect(source).toContain('title: mainText(appBrand.displayName)');
-  expect(source).toContain('tray.setToolTip(`${mainText(appBrand.displayName)} — ${label}`)');
+  expect(source).toContain('tray.setToolTip(mainText(appBrand.displayName))');
   expect(read('src/main/ipc.ts')).toContain('displayName: appBrand.displayName');
   expect(read('src/renderer/main.ts')).toContain('if (next.displayName) applyAppBrand(next.displayName)');
   expect(source).toContain('onMainTextsChange(() => refreshNativeBrand(window))');
+});
+
+it('logs real before/after userData and the native tooltip getter capability', () => {
+  const source = read('src/main/index.ts');
+  expect(source.indexOf('branding: userData before=')).toBeLessThan(source.indexOf('  refreshNativeBrand(window);'));
+  expect(source.indexOf('branding: userData after=')).toBeGreaterThan(source.indexOf('  refreshNativeBrand(window);'));
+  expect(source).toContain("unchanged=${userData === app.getPath('userData')}");
+  expect(source).toContain("JSON.stringify(getToolTip.call(tray)) : 'unavailable'");
+  expect(source).toContain('configured=${JSON.stringify(mainText(appBrand.displayName))}');
 });
 
 it('keeps profile/package identities independent of display branding', () => {
   const pkg = JSON.parse(read('package.json'));
   expect(pkg.name).toBe('chat-on-steroids');
   expect(pkg.productName).toBeUndefined();
-  const builder = read('electron-builder.yml');
-  expect(builder).toMatch(/^appId: com\.chatonsteroids\.app$/m);
-  expect(builder).toMatch(/^productName: Chat On Steroids$/m);
-  const source = read('src/main/app-brand.ts').replace(/\/\/[^\n]*/g, '');
-  expect(source).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(/);
+  const builder = loadYaml(read('electron-builder.yml')) as Record<string, unknown>;
+  expect(builder.appId).toBe('com.chatonsteroids.app');
+  expect(builder.productName).toBe('Chat On Steroids');
+  const source = ['src/main/app-brand.ts', 'src/main/index.ts'].map(read).join('\n').replace(/\/\/[^\n]*/g, '');
+  expect(source).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(|app\.name\s*=/);
   expect(read('src/renderer/index.html')).not.toContain('(dev)');
 });
 

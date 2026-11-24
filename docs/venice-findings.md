@@ -1768,11 +1768,101 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 ### 不明なこと・残る確認
 
-- 内蔵画面だけの現在のメニューバーでは、devのステータスアイコンが可視領域外に隠れている。
-  nativeのツールチップが表示された状態は未確認。hoverの実座標も確認したが、表示したとは記録しない。
-  他アプリの終了やOS設定の変更は行わず、アイコンが表示できる画面状態での目視確認を残す。
-  名前の設定経路は同じmainキーを使う回帰テストで確認済み。
+- この時点で残したトレイのツールチップ目視は、下記の追加確認で解消した。
+  外部ディスプレイで実際の表示を確認し、証跡を保存した。
 
 ### 次に確認したいこと
 
-- ステータスアイコンが見える状態で、トレイのツールチップを目視する。
+- トレイの追加確認結果は次節に記録する。
+
+## 2026-11-24 — userData・トレイ・パッケージ版の追加確認
+
+### 分かったこと
+
+#### 1. userDataの実値とreadyの順序
+
+- `app.getPath('userData')`で取得した実値を、表示名の適用前後にログへ出した。
+  devでは前後とも`/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime`で、
+  `ready=true; packaged=false; unchanged=true`。従来の起動引数で指定していた専用runtimeと一致する。
+  根拠は`outputs/venice-read-live/runtime/app.log`の`branding:`行。
+- パッケージ版も隔離した検証用profileを使い、前後とも
+  `/Users/atsu/chat-on-venice/outputs/brand-native-validation/packaged-runtime`、
+  `ready=true; packaged=true; unchanged=true`を記録した。通常版の保存先は検証に使っていない。
+- `src/main/index.ts`と`src/main/app-brand.ts`に`app.setName()`、`app.name =`、
+  `app.setPath()`による識別子変更はない。`!app.isPackaged`の判定自体はmodule読込時だが、
+  nativeの表示名適用は`app.whenReady()`後。ready前の名前変更でprofileを動かす経路は追加していない。
+  このログは同じ起動内の適用前後の比較であり、過去の未記録のgetPath値を再現したものではない。
+
+#### 2. トレイの設定値と実表示
+
+- 使用中のElectron 44.3.0は`Tray.setToolTip()`を提供するが、`Tray.getToolTip()`は提供しない。
+  installedの`electron.d.ts`と[Electron 44のAPI実装](https://github.com/electron/electron/blob/v44.3.0/shell/browser/api/electron_api_tray.cc)を照合した。
+  存在しないgetterの戻り値は作らず、実行時に
+  `branding: tray.getToolTip=unavailable; configured="Chat On Venice (dev)"`と記録する。
+- tooltipは接続状態の接尾辞を外し、正確に`Chat On Venice (dev)`へ揃えた。
+  接続状態は既存のトレイメニューに残る。
+- 外部ディスプレイの可視領域にある白いferroを実際にhoverし、
+  `Chat On Venice (dev)`のネイティブtooltipを目視した。
+  根拠は`outputs/brand-native-validation/tooltip-verified.png`。
+  メニューを開いた実表示も`tray-menu-external.png`に保存した。
+  確認中に一時的に隠した他アプリとOSのメニューバー項目、時計の日付・曜日はすべて元へ戻した。
+
+#### 3. 小サイズの実ファイル
+
+- `build/icons/icon16.png` / `icon22.png` / `icon32.png` / `icon48.png`を生成して実ファイルを目視した。
+  16pxのタイル版は歯が詰まりferroの細部が読みにくい。22pxは小さいが輪郭が分かり、32/48pxは塗り潰れず歯と曲線を識別できる。
+- トレイ専用の白単色透過版は16pxの画素に合わせて調整し、6本の歯の間に1pxの隙間を確保した。
+  `artwork/trayTemplate.png`は16px、`trayTemplate@2x.png`は同じ形を2倍にした32px。
+  小サイズのcrest・後方の刃・足の輪郭を保ち、実メニューバーでもferroとして読めることを確認した。
+- 既存の`npm run icon`の起動方法、ICO/PNG/BMP・拡張アイコンの出力は維持した。
+  回帰テストは16/22/32/48/128/256/512pxとlegacy出力を列挙し、16pxの歯と隙間のalphaも検証する。
+
+#### 4. macOSのメニュー名を2種類の実行形で確認
+
+- checkoutからのdev実行は`Electron`、このブランチをローカルでパッケージしたappは`Chat On Steroids`だった。
+  両方を各プロセスの実メニューバーから読み取った。根拠は`outputs/brand-native-validation/menu-names.txt`。
+  **両方とも許容する**。表示名のために`app.setName()`を使わず、保存先と既存native識別子を守る。
+- dev判定はmainの`!app.isPackaged`の1箇所。パッケージ版は開発ブランチからのローカルbuildでも
+  `app.isPackaged=true`なので、ウィンドウ・About・tooltipにはprod側の`Chat On Venice`を使う。
+  productNameは`Chat On Steroids`、appIdは`com.chatonsteroids.app`のまま。
+- 既存の`scripts/package.mjs --platform darwin --arch arm64 --dir`で生成し、
+  `release/mac-arm64/Chat On Steroids.app`のad-hoc封印とnative runtime smoke確認が成功した。
+  根拠は`outputs/brand-native-validation/package.log`。生成時のホスト別ライセンス一覧はartifact側に含め、
+  今回と無関係な依存inventoryの差分はソースへコミットしない。
+
+#### 5. 英語キー不足の原因
+
+- 英語キー不足は**実装側のen.jsonカタログの欠落**だった。テストのfixture不足ではない。
+  `fa39d852`の実diffには2.1.55で増えた12キーと、全体監査で見つかった単数形キー
+  `Restored {0} of {1} files|one`の追加がある。
+  `src/renderer/turn-changes.ts`の既存`tn()`呼出しに対応する値は`Restored {0} of {1} file`。
+- それ以前の初回3件の`window-lifecycle`失敗は別件で、VM環境に新しい`mainText`依存を渡していなかったため。
+  `30d37073`のimportとVM注入のdiffで説明できる。英語カタログの欠落と混同しない。
+  今回、既存テストの削除・skip追加・assertの緩和は行っていない。
+
+#### 6. 最終候補のテスト
+
+- Node 22.23.5で全体`npm test`を今回1回実行し、終了コード0。
+  ファイルは**525 passed / 0 failed / 20 skipped**、
+  テストは**12,854 passed / 0 failed / 218 skipped**だった。
+  根拠は`outputs/brand-native-validation/full-test.log` / `full-test.exit`。
+- branding・icon・window lifecycleの対象テストも**28 passed / 0 failed / 0 skipped**。
+  `npm run typecheck` / `npm run build`も成功した。既存テストの削除・skip追加はdiffにない。
+- 最終buildでdev/prod・ja/en・1280/800pxのheadless表示確認も成功。
+  devを従来の8766 / 専用runtimeで起動し直し、最終ログでもパス不変とtooltipの設定値を確認した。
+  `/hello`はversion 2.1.55 / bridge 15 / paired:trueだった。実Venice送信は行っていない。
+
+#### 7–8. 識別子の回帰テストとWhat's New
+
+- productName/appIdは以前から設定行のリテラルをregexで比較していた。今回さらにYAMLをparseし、
+  `.toBe('Chat On Steroids')` / `.toBe('com.chatonsteroids.app')`で値を直接固定した。
+  ja/enのdev/prodキーもfallbackを使わず直接参照するテストを維持した。
+- 2.1.55のWhat's Newはdevビルドにも含まれ、通常版と同じ更新時の一度だけ表示する条件で出る（devを除外する分岐はない）。
+
+### 不明なこと
+
+- `tray.getToolTip()`の戻り値はAPIが存在しないため取得できない。設定値のログと実際のtooltip表示は両方確認済み。
+
+### 次に確認したいこと
+
+- 次の機能作業は既存のprogressキューで管理する。この追加確認では着手していない。

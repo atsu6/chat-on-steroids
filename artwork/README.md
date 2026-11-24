@@ -33,7 +33,9 @@ It uses the locally installed Playwright and Google Chrome, with external reques
 The palette is teal/white. `build/icons/icon{16,22,32,48,128,256,512}.png` supplies the
 complete review set. The same sizes also get `ferro-template*.png`: white on transparent,
 cropped around the ferro rather than the teal square, to improve small menu-bar legibility.
-Mask-transparent pixels contribute to the resampling area so tooth gaps antialias at 16px.
+Mask-transparent pixels contribute to the resampling area. The 16px tray template instead
+uses a pixel-hinted ferro: six one-pixel teeth alternate with one-pixel gaps, preserving the
+crest, rear blade and turned foot. Its 32px Retina counterpart doubles the same grid.
 The generator also writes `artwork/trayTemplate.png` (16px) and `trayTemplate@2x.png` (32px).
 These two are checked in so dev startup does not depend on ignored build files; macOS dev
 uses them as template images. Production keeps the existing connection-status tray icons.
