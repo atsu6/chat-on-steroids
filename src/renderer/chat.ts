@@ -10278,11 +10278,12 @@ export function initVeniceGrantDialog(): void {
   const allow = document.getElementById('veniceGrantAllow') as HTMLButtonElement;
   const deny = document.getElementById('veniceGrantDeny') as HTMLButtonElement;
   const error = document.getElementById('veniceGrantError')!;
+  const write = document.getElementById('veniceGrantWrite') as HTMLInputElement;
   let current: VeniceGrantPending | null = null, busy = false;
-  const sync = (): void => { pick.disabled = busy; deny.disabled = busy; allow.disabled = busy || !current?.roots.length; };
+  const sync = (): void => { pick.disabled = busy; write.disabled = busy; deny.disabled = busy; allow.disabled = busy || !current?.roots.length; };
   const paint = (pending: VeniceGrantPending[]): void => {
     const next = pending[0] ?? null;
-    if (next?.id !== current?.id) { busy = false; error.hidden = true; }
+    if (next?.id !== current?.id) { busy = false; error.hidden = true; write.checked = false; }
     current = next;
     if (!next) { if (dialog.open) dialog.close(); return; }
     document.getElementById('veniceGrantSession')!.textContent = `${next.sessionTitle} · ${next.sessionId}`;
@@ -10302,7 +10303,7 @@ export function initVeniceGrantDialog(): void {
     if (!id || busy || (kind === 'allow' && !current?.roots.length)) return;
     busy = true; error.hidden = true; sync();
     try {
-      const reply = kind === 'pick' ? await api.veniceGrantPick(id) : await api.veniceGrantAnswer(id, kind === 'allow');
+      const reply = kind === 'pick' ? await api.veniceGrantPick(id) : kind === 'allow' && write.checked ? await api.veniceGrantAnswer(id, true, true) : await api.veniceGrantAnswer(id, kind === 'allow');
       if (!reply.ok && current?.id === id) { error.textContent = reply.error; error.hidden = false; }
       if (kind === 'pick' && reply.ok) paint(reply.data as VeniceGrantPending[]);
     } catch {

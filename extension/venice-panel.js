@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const ORIGIN = 'https://venice.ai';
+  const t = (key, fallback) => (typeof chrome !== 'undefined' && chrome.i18n?.getMessage(key)) || fallback;
   if (location.origin !== ORIGIN) return;
   let ready = false, activeId = null, lastId = null, runId = null, stopping = false, revoked = false, ui;
   const post = (op, extra = {}) => window.postMessage({type: 'cos-venice-panel-request', op, ...extra}, ORIGIN);
@@ -33,6 +34,30 @@
       stopping = true;
       ui.state.textContent = '停止待ち';
       message('現在の処理が終わるのを待っています。');
+    }
+    if (data.event === 'patch-preview') {
+      if (!Number.isInteger(data.index) || data.index < 1 || data.index > 40 || typeof data.diff !== 'string' ||
+          data.diff.length > 1_000_000 || typeof data.previewId !== 'string') return;
+      const row = document.createElement('li'); row.className = 'patch-preview';
+      const title = document.createElement('div'); title.textContent = `${String(data.index).padStart(2, '0')} / core/apply_patch / ${t('venice_patch_preview', '適用前の差分')}`;
+      const preview = document.createElement('pre');
+      preview.tabIndex = 0; preview.setAttribute('aria-label', t('venice_patch_preview', '適用前の差分'));
+      const lines = data.diff.split('\n');
+      const long = lines.length > 12 || data.diff.length > 1200;
+      preview.textContent = long ? lines.slice(0, 8).join('\n').slice(0, 1200) + '\n…' : data.diff;
+      row.append(title, preview);
+      if (long) {
+        const details = document.createElement('details'), summary = document.createElement('summary'), full = document.createElement('pre');
+        summary.textContent = t('venice_patch_full_diff', '差分の全文を表示'); full.textContent = data.diff;
+        full.tabIndex = 0; full.setAttribute('aria-label', summary.textContent);
+        details.addEventListener('toggle', () => {
+          if (details.open) ui.steps.scrollTop += details.getBoundingClientRect().top - ui.steps.getBoundingClientRect().top;
+        });
+        details.append(summary, full); row.append(details);
+      }
+      ui.steps.append(row); ui.steps.scrollTop = ui.steps.scrollHeight;
+      post('patchPreviewRendered', {id: activeId, previewId: data.previewId});
+      return;
     }
     if (data.event === 'step') {
       const step = data.step;
@@ -74,7 +99,7 @@
         #state[data-error=true] { color:var(--vp-red); }
         button,input,textarea { font:inherit; color:inherit; } button { min-height:36px; border:1px solid var(--vp-line); border-radius:7px; padding:6px 12px; background:var(--vp-field); cursor:pointer; }
         button:disabled { opacity:.45; cursor:default; } button:active:not(:disabled) { transform:translateY(1px); }
-        :is(button,input,textarea,ol):focus-visible { outline:2px solid var(--vp-accent); outline-offset:2px; }
+        :is(button,input,textarea,ol,pre,summary):focus-visible { outline:2px solid var(--vp-accent); outline-offset:2px; }
         #toggle { font-size:12px; padding:4px 8px; } #body { padding:0 14px 14px; max-height:calc(100dvh - 96px); overflow:auto; }
         label { display:block; font-size:13px; font-weight:550; margin-bottom:6px; }
         textarea { display:block; width:100%; min-height:88px; max-height:180px; resize:vertical; padding:10px; border:1px solid var(--vp-line); border-radius:8px; background:var(--vp-field); }
@@ -84,6 +109,11 @@
         ol { list-style:none; padding:0; margin:12px 0 0; max-height:160px; overflow:auto; border-top:1px solid var(--vp-line); }
         ol:empty { display:none; } li { padding:7px 0; font:13px/1.6 ui-monospace,'SF Mono',monospace; white-space:nowrap; min-width:max-content; }
         li[data-ok=false] { color:var(--vp-red); } li[data-ok=true] { color:var(--vp-green); }
+        ol:has(.patch-preview) { max-height:280px; }
+        ol:has(details[open]) { max-height:min(400px,45dvh); }
+        li.patch-preview { white-space:normal; min-width:0; color:var(--vp-ink); }
+        .patch-preview pre { margin:8px 0; max-height:280px; overflow:auto; white-space:pre; font:12px/1.6 ui-monospace,'SF Mono',monospace; }
+        .patch-preview summary { cursor:pointer; min-height:28px; color:var(--vp-muted); }
         #message { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; max-height:140px; overflow:auto; margin:12px 0 0; }
         :host([data-collapsed]) { width:280px; }
         @media (prefers-color-scheme:dark) { :host { color-scheme:dark; --vp-bg:#181818; --vp-field:#262626; --vp-ink:#fff; --vp-muted:#aeaeae; --vp-line:#3f3f3f; --vp-accent:#b0cbed; --vp-on-accent:#000; --vp-red:#dd6a6a; --vp-green:#75bb97; } }

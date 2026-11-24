@@ -4184,5 +4184,9 @@
   "許可しない": "Ne pas autoriser",
   "このrunだけ許可": "Autoriser pour cette exécution uniquement",
   "未割り当て": "Non attribué",
-  "承認操作を完了できませんでした。": "Impossible de terminer l’action d’autorisation."
+  "承認操作を完了できませんでした。": "Impossible de terminer l’action d’autorisation.",
+  "Also allow writing": "Autoriser aussi l’écriture",
+  "Allow creating, editing, moving, and deleting files in the selected folders.": "Autorisez la création, la modification, le déplacement et la suppression de fichiers dans les dossiers sélectionnés.",
+  "書き込みも許可する": "Autoriser aussi l’écriture",
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Autorisez la création, la modification, le déplacement et la suppression de fichiers dans les dossiers sélectionnés."
 }

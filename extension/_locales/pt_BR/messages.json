@@ -1327,5 +1327,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Algo foi digitado no chat enquanto o despertar do worker era preparado, então o despertar não o substituiu."
-  }
+  },
+  "venice_patch_preview": {"message": "Diferenças antes de aplicar"},
+  "venice_patch_full_diff": {"message": "Mostrar todas as diferenças"}
 }

@@ -4100,5 +4100,9 @@
   "許可しない": "Nicht erlauben",
   "このrunだけ許可": "Nur für diesen Durchlauf erlauben",
   "未割り当て": "Nicht zugewiesen",
-  "承認操作を完了できませんでした。": "Die Freigabeaktion konnte nicht abgeschlossen werden."
+  "承認操作を完了できませんでした。": "Die Freigabeaktion konnte nicht abgeschlossen werden.",
+  "Also allow writing": "Auch Schreiben erlauben",
+  "Allow creating, editing, moving, and deleting files in the selected folders.": "Erlaube das Erstellen, Bearbeiten, Verschieben und Löschen von Dateien in den ausgewählten Ordnern.",
+  "書き込みも許可する": "Auch Schreiben erlauben",
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Erlaube das Erstellen, Bearbeiten, Verschieben und Löschen von Dateien in den ausgewählten Ordnern."
 }

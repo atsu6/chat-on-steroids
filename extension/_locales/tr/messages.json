@@ -1276,5 +1276,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
-  }
+  },
+  "venice_patch_preview": {"message": "Uygulamadan önceki farklar"},
+  "venice_patch_full_diff": {"message": "Tüm farkları göster"}
 }

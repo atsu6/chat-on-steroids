@@ -10,9 +10,9 @@ readの承認UIを実装し、パネルからのgrant要求・ネイティブフ
 
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
-現在のbridgeにはgrant付き `core/read` の入口がある。shell・書込・Desktopはこの入口に公開していない。
+現在のbridgeはgrant付き `core/read` と、独立したwrite同意を要する `core/apply_patch` を受ける（§12）。shell・Desktopは公開しない。
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
-今回の実装範囲は `read` の縦接続・開発用grant・関連テストと文書までとする。
+初回のread接続は§10–11、今回のapply_patch接続は§12。以降のキューは `venice-progress.md` を参照する。
 
 ## 1. agent map の要約（8行）
 
@@ -237,13 +237,13 @@ Core/desktopでsurface境界を維持し、初回公開のallowlistは `core/rea
 
 ### 5.1. wire型と受付の状態遷移
 
-`src/shared/venice-integration.ts` は次の3型のみをexportする。実行時のvalidator・定数・関数は持たない。
+`src/shared/venice-integration.ts` は主要wire型の下記3つと、承認UI用の `VeniceGrantPending` / `VeniceGrantReply` をexportする。実行時のvalidator・定数・関数は持たない。
 
 | 型 | フィールド |
 | --- | --- |
 | `VeniceToolCallRequest` | `runId: string`, `callId: string`, `surface: 'core' \| 'desktop'`, `tool: string`, `args: Record<string, unknown>` |
 | `VeniceToolCallResponse` | `callId: string`, `state: 'pending' \| 'completed' \| 'unknown'`, `result?: unknown`, `error?: string` |
-| `VeniceRunGrant` | `runId: string`, `sessionId: string`, `tabId: number`, `documentId: string`, `tools: string[]`, `roots: string[]` |
+| `VeniceRunGrant` | `runId: string`, `sessionId: string`, `tabId: number`, `documentId: string`, `tools: string[]`, `roots: string[]`, `write?: boolean` |
 
 grantはappが同意後に発行・保存する記録であり、clientから受け取って権限を作るデータではない。
 `tools` は `core/read` のようなsurface付きの名前を保存する。`roots` はファイルツールの承認rootで、
@@ -477,7 +477,7 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 - grantの明示revoke・bridge Disconnect・app終了で新規実行を止める。別documentは以前のrun設定を継承しない。
   現在のパネルは§11の承認UIとStop失効を使う。完了後もrunIdを保持し、完了自体では失効させない。
   session/providerの全面統合は後段階。
-- `desktopUnattributed`を有効にせず、shell・patch・find・Desktop・画像添付は公開しない。
+- このread段階では `desktopUnattributed`を有効にせず、shell・patch・find・Desktop・画像添付を公開しなかった。patchの追加は§12を参照。
   テキストreadの縦接続までを確認し、画像をモデルが見られるという扱いにはしない。
 
 ## 11. パネルからrun単位でreadを許可する（2026-11-24実装）
@@ -507,8 +507,48 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
   新documentの起動通知 `/venice/grant/document` も旧documentのgrantを失効させる。
   grantを待つHTTPはtab操作queueを占有せず、Stopが承認待ちの後ろで詰まらない。
 - 保存済みcall結果の同一所有者による再取得は従来契約どおり。失効後に同じrunIdで新しいcallIdを送ると `RUN_REVOKED`。
-  承認UIは日本語の指定文言を使用する。shell・書込・Desktopの権限は含まない。
+  readの承認UIは日本語の指定文言を使用する。既定ではshell・書込・Desktopの権限を含まない。独立したwriteの追加同意は§12。
 
 今回の実測: configにない合成フォルダをネイティブ選択して許可し、パネルのcore/readとdoneがともにok:true。
 停止後もrunIdは同じで、新規readはRUN_REVOKED。gateway・sessionの実行記録は各1件、モデル通信は2回ともHTTP 200。
 詳細はfindings「grant要求・承認UIとrun失効」を参照する。
+
+
+## 12. runのwrite同意とcore/apply_patch（2026-11-24）
+
+パネルの「実行」から既存の承認画面を開き、対象フォルダーを選ぶ。
+書き込ませる場合だけ「書き込みも許可する」をチェックして「このrunだけ許可」を押す。
+未チェックなら従来どおりreadのみ。チェックは別の承認要求に引き継がない。
+説明は「選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。」。
+見出し・readの本文・ボタンの日本語は変更せず、新しい文言も既存i18n経路の全カタログで翻訳する。
+
+- `venice:grantAnswer` の任意の `write` は既定false。app本体main frameからだけ受け、
+  gatewayが `write:true` と `tools:['core/read','core/apply_patch']` を同意記録に保存する。
+  既存のread grantは変更しない。ページからのgrant要求は引き続きread要求だけで、writeを自己申告できない。
+- `/venice/tools` の本適用は既存のcallId受付・永続化・結果cacheを使う。
+  gatewayとhost-admitted kernelの両方でread/patchだけをallowlistし、patchには明示writeを要求する。
+  handler・schema・patch parser・sandbox・rollback・記録は既存実装を再利用する。
+  実行時のRead-onlyとcreate/edit/move/deleteの個別capabilityも適用する。
+- Veniceの作業基準はgrantの最初のroot。別chatの学習cwdやsessionのグローバルprojectから借りない。
+  全source・destination・move先をgrantのcanonical rootsで解決し、root外・traversal・外向きsymlinkを拒否する。
+  checkpointの待ち時間が終わった直後にも、失効とlive capabilityを検証してから本適用を始める。
+- プレビューは同じ `/venice/tools` に `{sender,request,preview:true}` を送る。
+  同じwrite grant・sender・root・schema・patch検証に加えてread capabilityを必要とする。
+  既存patch engineのwrite/remove/mkdirをメモリ上のoverlayに向け、実ファイルの変更、checkpoint、実行記録は作らない。
+  既存 `unifiedDiff` で `---` / `+++` と行番号付きhunkを作り、shield適用後の `{diff}` を返す。
+- パネルは差分をtextContentで先に描画する。12行または1,200文字を超えると先頭8行・最大1,200文字を表示し、
+  全文を未展開のdetailsに保持する。preはキーボードでスクロール可能。新しいラベルは拡張の全13カタログに登録する。
+  DOMへ挿入したことの通知を受けてから本適用を送る。5秒以内に表示通知が来ない差分は適用しない。
+  これは自動の表示通知であり、呼び出しごとの承認UIは増やさない。
+- プレビューと本適用のrequestは同じcallId・tool・argsを使う。プレビューは実行ledgerを消費しない。
+  本適用が通信断/pendingになった場合だけ同じcallIdで従来どおり1回再取得し、unknownから新しい実行を作らない。
+  プレビュー後に失効したrunの本適用は拒否する。完了済みの同一要求は失効後も元の所有者だけが再取得できる。
+- プレビューは表示時点の読取snapshotであり、本適用は改めてpatchのcontextとpathを検証する。
+  別プロセスとの排他的な編集lockは取らない。差分はUTF-8で1,000,000 bytesまでとし、超過時は明示拒否する。
+  受理した差分の全文を黙って切り捨てることはしない。
+- 追加の実装境界は `src/main/mcp/tools-core.ts` のVenice限定分岐と、
+  `src/main/venice-patch-preview.ts` のメモリoverlay。通常のChatGPT handler・shell・Desktopは変更しない。
+
+検証はユーザー指定どおり実Venice送信なし。`test/venice-apply-patch*.test.ts` は実kernel・HTTP route・一時フォルダーと
+合成DOMを検証し、`node test/venice-apply-patch.visual.cjs` は通信を全てローカル応答/abortにしたheadless Chromeで
+既存のMAIN/ISOLATED bridgeと承認・差分の描画を確認する。実測値・完了commitはfindingsとprogressに記録する。

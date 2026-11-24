@@ -1225,5 +1225,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
-  }
+  },
+  "venice_patch_preview": {"message": "应用前的差异"},
+  "venice_patch_full_diff": {"message": "显示完整差异"}
 }

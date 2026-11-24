@@ -1276,5 +1276,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Something was typed in the chat while the worker's wake was getting ready, so the wake did not replace it."
-  }
+  },
+  "venice_patch_preview": {"message": "Diff before applying"},
+  "venice_patch_full_diff": {"message": "Show full diff"}
 }

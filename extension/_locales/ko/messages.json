@@ -1225,5 +1225,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "작업자 깨우기를 준비하는 동안 채팅에 무언가가 입력되어, 깨우기가 그것을 바꾸지 않았습니다."
-  }
+  },
+  "venice_patch_preview": {"message": "적용 전 변경 사항"},
+  "venice_patch_full_diff": {"message": "전체 차이 보기"}
 }

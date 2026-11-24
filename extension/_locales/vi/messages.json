@@ -1225,5 +1225,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
-  }
+  },
+  "venice_patch_preview": {"message": "Khác biệt trước khi áp dụng"},
+  "venice_patch_full_diff": {"message": "Hiển thị toàn bộ khác biệt"}
 }

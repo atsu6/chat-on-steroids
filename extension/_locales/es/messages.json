@@ -1327,5 +1327,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Se escribió algo en el chat mientras se preparaba el aviso del worker, así que el aviso no lo reemplazó."
-  }
+  },
+  "venice_patch_preview": {"message": "Diferencias antes de aplicar"},
+  "venice_patch_full_diff": {"message": "Mostrar todas las diferencias"}
 }

@@ -841,8 +841,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('venice:grantAnswer', async (payload, event) => {
     requireVeniceRenderer(event);
-    const { id, allow } = z.object({ id: z.string().uuid(), allow: z.boolean() }).strict().parse(payload);
-    await veniceToolGateway.answerApproval(id, allow);
+    const { id, allow, write } = z.object({ id: z.string().uuid(), allow: z.boolean(), write: z.boolean().optional().default(false) }).strict().parse(payload);
+    await veniceToolGateway.answerApproval(id, allow, write);
   });
 
   // Temporary development-only grant owner; no UI, no generic IPC or root approval.
