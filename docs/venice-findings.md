@@ -1337,3 +1337,68 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 ### 次に確認したいこと
 
 - 次は4のexec_command。今回は着手していない。
+
+
+## 2026-11-24 — exec_commandのrun所有・独立shell同意・分離出力
+
+### 分かったこと
+
+- Node `v22.23.5`を確認し、クリーンな`158d68c1`から`codex/venice-exec`を作成した。
+  実装の根拠commitは`eba8035a`（gateway / kernel / managerの任意observerとrun所有）、
+  `969752ce`（独立同意 / i18n / パネル出力）、`ab7dd7a8`（観測のshieldとmask後の上限）、
+  `0c3fb4fd`（既存のドイツ語du表記に統一）。
+- read・write・shellは独立し、shellは明示同意がなければ省略される既定OFFのフラグ。
+  チェックなしの既存read応答・write応答の引数/payloadを維持した。
+  日本語の項目名は「コマンドの実行も許可する」。警告は
+  「あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。」。
+- 実execは既存handlerのcwd解決、canonical / symlink検証、command policy、shell正規化を通す。
+  cwdの既定はgrant先頭root。read/writeの承認だけではexec不可、shell承認だけではpatch不可。
+  stdout/stderrの分離のため単一cmdのpipeモードを使い、Veniceではtty:trueとcmdsを拒否する。
+  通常CoSのTTY・batch・出力仕様は変えない。
+- spawn待ちを含めrunごと3本まで。既存managerの生存期間をrunの所有者に登録し、
+  revoke・Stop・app終了でそのrunの生存プロセスツリーを終了する。
+  一時フォルダー内の実プロセスで子プロセスkillと別runの生存を確認した。
+  元のcallIdの再取得は再実行せず、失効後も元の認証済み所有者に限って確定済み応答を返す。
+- waitはyield_time_msで既定10,000ms・最大30,000ms。時間切れでkillせずprocessIdを返す。
+  戻り値はprocessId・exitCode・stdout / stderrとoutput、running、truncated、omittedBytesを含む。
+  同一要求の観測は同じgatewayのoutput:true分岐でsender / run / callId / tool / argsを検証する。
+  追加のtool実行やstdin送信はしない。
+- 出力はプロセスごとに合計64KiBの先頭を保持し、末尾を省略する。観測と確定応答の両方に
+  既存の全体/プロジェクト設定のsecrets shieldを適用し、maskで増えた表示も64KiBへ収める。
+  パネルはtextContentを使い、stdout / stderrを分け、改行・横スクロール・省略表示を保つ。
+  yield後・モデルdone後も観測を続け、Stopまたは新runで止める。
+- 追加テストは20件成功。最終の対象実行は103成功 / 0失敗
+  （`outputs/venice-exec/final-targeted.log`、追加20件 + renderer-i18n 83件）。
+  関連gateway / patch / secrets-shieldも112件成功（`output-shield-final.log`）。
+- 全体テストは1回実行し、ファイル517成功 / 2失敗 / 20スキップ、
+  テスト12,794成功 / 3失敗 / 218スキップ（`full-test.log`）。
+  ドイツ語敬称は単独でも再現したため今回の翻訳を修正し、既存テスト83件の成功で確認した。
+  execのshield / 上限2件は単独で再現せず、該当15件が全て成功した（`full-failures-isolated.log` / `final-targeted.log`）。
+  全体実行中にその実装を補修しており、旧変換キャッシュや読込時点が影響した可能性はあるが原因は未特定。
+  ユーザー指定の単独切り分けに従い非再現失敗として記録し、全体の追加再実行はしていない。
+  全体0 failedと読み替えない。
+- 既存の補助CJSは68成功 / 2失敗（`browser-regression.log`）。
+  `venice-input.test.cjs`のactivate検査は初期localDocument通知を先頭のactivateと期待して失敗し、
+  CONTRACT検査は既存core/readのスラッシュを正規表現が許容せず失敗する。
+  `158d68c1`の該当ソースをoutputs内に展開して同じ2件の失敗を確認した（`baseline-input.log`）。
+  今回の差分に起因するものではなく、既存テストは変更・skip・緩和していない。
+- 最終`npm run typecheck`・`npm run build`は終了コード0。
+  headlessは`node test/venice-exec.visual.cjs`で成功。既存CSS / i18nとMAIN / ISOLATEDを実行し、
+  独立したshellチェック、日本語警告、ja/de、PC/モバイル、stream表示、改行、横スクロール、
+  HTMLを解釈しない出力、省略、yield後の観測継続、Stopを確認した。axe違反0・pageerror 0。
+  画像は`outputs/venice-exec/`。全てのブラウザ通信はローカル合成応答またはabortであり、実Venice送信recordはない。
+
+### 不明なこと
+
+- 実Veniceへの送信・モデル選択・実モデルがexecを選んだ場合の動作は未検証（今回の指定どおり未送信）。
+- 全体実行でのexec 2件の非再現失敗について、変換キャッシュ/読込時点を含む正確な原因は未特定。
+  単独実行の成功を全体実行の成功とは扱わない。
+- 既存のprivate endpoint 403・attestation・規約解釈・サーバ履歴保持等は未解明のまま引き継ぐ。
+  認証回避調査やprivate endpointの再送は実施していない。
+
+### 次に確認したいこと
+
+- 5のwrite_stdin。今回のrun所有者とprocessIdを再利用してpoll / stdinを接続し、別run・失効後の継続を拒否する。
+  現行pipeは既存managerのstdin-closed契約を保つ。非空入力と空入力pollを区別して実装・検証する。
+- 補助CJSの既存2件は、初期通知とcore名前空間を含む現行契約に対するテスト更新が別途必要。
+  今回は既存テスト変更禁止のため、そのまま記録した。
