@@ -1202,11 +1202,60 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 ### 不明なこと
 
-- 他言語での新ダイアログ文言は未対応。shell・書込・Desktop、画像、provider sessionの全面統合は今回の対象外。
-- 全体verifyは今回再実行していない。先行タスクの既存3件（extension-i18n / extension-popup / Firefoxの既存innerHTML）を引き継ぐ。
+- 他言語での新ダイアログ文言は当時未対応だったが、下記の回帰修正で対応済み。shell・書込・Desktop、画像、provider sessionの全面統合はこの実装の対象外。
+- この時点では全体verifyを再実行していなかった。extension-i18n / extension-popup / FirefoxのinnerHTMLは、下記の回帰修正でVenice追加箇所の問題と確認し、解消した。
 - private endpointの403原因、規約解釈、認証/attestation、provider側の履歴保持、Content-Typeは未解明のまま引き継ぐ。
 
 ### 次に確認したいこと
 
 - パネルの承認→read→Stop→同じrunIdで拒否、まで確認完了。現行手順と期限・保存/失効の意味は統合計画§11を参照。
   今回のコード・関連テスト・文書をローカルcommitする。pushしない。
+
+
+## 2026-11-24 — Node 22でのVenice追加ハンクの回帰修正
+
+### 分かったこと
+
+- 作業先は `/Users/atsu/chat-on-venice`。開始HEADは `e127d93b`、作業ツリーはcleanだった。
+  Volta経由の実行値はNode `22.23.5` / npm `10.9.9`。Node固定設定は変更していない。
+- 指定8ファイルの初回実行は7ファイル失敗、22テスト失敗 / 839成功、未処理エラー112件だった。
+  `renderer-timeline.part1` のassertは通ったが、初期承認一覧のnullを `pending[0]` として読むエラーが出ていた。
+- ブラウザ入力保守の同じ14件とtimelineの同じnull参照エラー112件を、最初の3回の指定8本で連続確認した。
+  その3回が終わるまで、この2つの挙動は変更しなかった。フレークとして扱わず、追加ハンクを修正した。
+- manifestのnameを `__MSG_extension_name__` に戻し、13言語の拡張カタログの値を
+  `Chat On Venice (dev)` にした。既存ChatGPTのcontent_scriptsを先に保ち、i18n helperの順序を復元した。
+  Venice bridgeは既存の専用ISOLATED登録を維持し、不要なresource登録は追加していない。
+- パネルのstyleと全要素を `createElement` / `append` / `replaceChildren` で組み立てるようにした。
+  CSS、ID、属性、入力値、実行・停止・折り畳みの契約は維持した。
+- backgroundの新しいトップレベルイベント登録が、既存診断コードの抽出範囲と、最初のtab更新listenerの境界を変えていた。
+  Veniceの登録は既存listenerの後に同期bootstrapし、独立したbridge入口からも同じ一度限りの登録を使う。
+  上流の診断・ブラウザ入力処理の本体は変更していない。MV3中断後の失効を含む既存bridgeテストも成功した。
+- ネイティブpickerは既存の `dialogLabel('Choose folders')` に統一し、titleとmacOSのmessageを両方設定する。
+  MAIN_TEXTSとrendererの既存publisherにも同じキーを追加した。
+- 承認画面の14種類の文言を12言語の全アプリカタログへ登録した。
+  HTMLの既存日本語と独立したdialog入口の契約を保ちつつ、`data-i18n` の英語sourceを既存 `t()` / `ui()` で翻訳する。
+  カタログには英語sourceと保持した日本語fallbackの両方を登録し、既存のキー・値は変更していない。
+  日本語の見出し・本文・ボタン・エラー値は元の文言どおり。shellの許可は追加していない。
+- 初期承認一覧は配列の応答だけをpaintし、一覧が提供されないnullで既存rendererを壊さないようにした。
+  不明な応答から許可を作ったり、toolを実行したりはしない。
+- 最終ソースで指定8ファイルは **8 passed / 861 tests passed / 失敗0**。
+  追加の既存Venice bridge・grant・read・panelテスト38件、独立dialogテスト2件、型チェックも成功した。
+- 指定8本が成功してから、全体の `npm test` を**1回だけ**実行した。終了コード0、390.61秒。
+  **513ファイル成功 / 20スキップ、12,762テスト成功 / 218スキップ、失敗0**。
+  テストの削除、skip追加、assert変更、その他test配下の変更はない。
+- インストール済みChromeのheadless描画で、パネルを1280px/light・390px/darkで確認した。
+  MAIN/ISOLATEDを分け、合成の実行・step・完了・停止・折り畳み、安全な文字列表示、CSS隔離、axe違反0件を確認した。
+  承認画面も実ソースから描画し、日本語の指定文言、ドイツ語、フォルダ未選択拒否、選択後の許可、Escape拒否を確認した。
+  全通信はローカル応答またはabortで、Veniceへの実送信は0回。通信record numberはない。
+- 各回のログと画面はGit除外の `outputs/venice-test-repairs-20261124/` に保存した。
+  ソース修正は `6557070c` / `a4c75e3a` / `8e262b3a` に分けてローカルcommitした。pushはしていない。
+
+### 不明なこと
+
+- 今回の画面確認は合成応答で行った。稼働中の開発アプリ・拡張の再起動や再読み込み、
+  実Veniceでのモデル送信、ネイティブpickerの再操作、build、verify一式は実施していない。
+- private endpointの403原因、規約解釈、認証/attestation、provider側の履歴保持、Content-Typeは未解明のまま引き継ぐ。
+
+### 次に確認したいこと
+
+- 今回の指定8本と全体テストの回帰修正は完了。progressのタスクには進んでいない。
