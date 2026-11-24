@@ -67,6 +67,14 @@ it('denies when live read permission is disabled, even with find in the run allo
   } finally { await saveConfig(config); }
 });
 
+it('works in read-only mode with command execution disabled', async () => {
+  const g = await grant(), config = getConfig();
+  try {
+    await saveConfig({ ...config, readOnly: true, capabilities: { ...config.capabilities, command: false } });
+    expect(result(await gateway.call(request(g.runId, { path: '/granted/hits.txt' }), sender)).count).toBe(2);
+  } finally { await saveConfig(config); }
+});
+
 it('refuses native, virtual, traversal and symlink paths outside the grant, even when globally approved', async () => {
   const g = await grant(), spy = vi.spyOn(search, 'search');
   for (const p of [outside, '/other', '/granted/../other', '/granted/escape.txt', '/granted/escape-dir']) {
