@@ -5,7 +5,7 @@ import { MAIN_TEXTS } from '../src/shared/main-texts.js';
 
 const name = 'Chat On Venice (dev)';
 const native = vi.hoisted(() => ({
-  app: { isPackaged: false, setAboutPanelOptions: vi.fn(), setName: vi.fn(), getVersion: () => '2.1.54', getAppPath: () => '/app' },
+  app: { isPackaged: false, setAboutPanelOptions: vi.fn(), setName: vi.fn(), getVersion: () => '2.1.55', getAppPath: () => '/app' },
   Menu: { getApplicationMenu: vi.fn(), buildFromTemplate: vi.fn((items: unknown[]) => ({ items })), setApplicationMenu: vi.fn() }
 }));
 vi.mock('electron', () => native);
@@ -47,6 +47,21 @@ it('registers dev/prod display names in the native contract and both required ca
   }
 });
 
+it('preserves all twelve upstream locales and 2.1.55 keys without spreading dev names', () => {
+  const upstreamLocales = ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+  for (const locale of [...upstreamLocales, 'en']) {
+    const catalog = JSON.parse(read(`src/renderer/locales/${locale}.json`));
+    for (const key of ['Restore turn', 'Undo in Review', 'Manage installed Skills', 'Free space per chat', 'Safer after a crash']) {
+      expect(Object.hasOwn(catalog, key), `${locale}: ${key}`).toBe(true);
+      expect(catalog[key].trim()).not.toBe('');
+    }
+    if (locale !== 'en' && locale !== 'ja') {
+      expect(Object.hasOwn(catalog, name)).toBe(false);
+      expect(Object.hasOwn(catalog, 'Chat On Venice')).toBe(false);
+    }
+  }
+});
+
 it.each([false, true])('main selects the packaged=%s name for native About, window and IPC', async packaged => {
   native.app.isPackaged = packaged;
   const otherMenu = { label: 'File' }, quit = { role: 'quit' };
@@ -56,7 +71,7 @@ it.each([false, true])('main selects the packaged=%s name for native About, wind
   expect(appBrand).toEqual({ development: !packaged, displayName });
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
   refreshNativeBrand(window as never);
-  expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.54',
+  expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55',
     ...(!packaged ? {iconPath: '/app/artwork/app-icon-source.png'} : {}) });
   expect(window.setTitle).toHaveBeenCalledWith(displayName);
   expect(native.app.setName).not.toHaveBeenCalled();

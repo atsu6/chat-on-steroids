@@ -1689,3 +1689,90 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - 将来パッケージ版を配布する際に、実bundleの表示名とアイコンを確認する。
 - マウス操作が競合しない時間に、起動中の開発アプリのツールチップとDock画像を確認する。
   短い操作停止の可否はユーザーへ確認中。この2点の記録が揃ったら実機確認を完了扱いにする。
+
+## 2026-11-24 — brand/dev-nameを2.1.55へrebase
+
+### 分かったこと
+
+- 対象は`brand/dev-name`だけ。開始時はcleanで、元tipは`21fb547f`。
+  upstreamは`https://github.com/totec448-spec/chat-on-steroids.git`が登録済みだった。
+  fetchでは既存`canary`タグの移動だけが拒否され、v2.1.55とupstream/mainは取得できた。
+  無関係なタグは強制更新していない。当たり判定の生ログは`outputs/brand-rebase-2155/impact.log`。
+- `git rebase --rebase-merges v2.1.55`は完了した。v2.1.55のcommitは`a6936f41`。
+  衝突は初期manifestのname / version周辺と、12ロケール末尾の追加キーだった。
+  manifestは2.1.55とVenice登録を保持し、ロケールはupstream側とVenice側のキーを両方残した。
+  機能単位で片側を捨てる解消はしていない。
+- rendererのupstream 12カタログと追加en.jsonを維持した。各upstreamカタログについて
+  v2.1.55の全キーが残ることを照合した。dev / prod名の追加はja / enだけ。
+  enには2.1.55のsourceキー12件と、`Restored {0} of {1} files|one`の単数形を補った。
+  単数形の値は既存`turn-changes.ts`のtn呼出しと同じ`Restored {0} of {1} file`。
+- `src/main/version.ts`、package / lockfile、拡張の版は2.1.55。
+  `scripts/verify-whats-new.cjs`はv2.1.55と差分がなく、2.1.55のleadを期待する版を採用した。
+  `codex/venice-exec`は元の`5543094a`のままで、rebaseもpushもしていない。
+
+#### テスト環境修正の棚卸し
+
+- 元`ba4ecfbe`（rebase後`30d37073`）をgit showで確認した。
+  `window-lifecycle.test.ts`へ実mainTextのimportとVM注入、タイトルassertを追加した差分は維持する。
+  後続のmain所有キーに必要なappBrand注入も維持する。初回3件のReferenceErrorは、この依存注入で説明できる。
+  主要差分は前節に掲載済み。元diffは`kept-test-environment.patch`、rebased diffは`rebased-test-environment.patch`に保存した。
+- #2261の`cdcaa8fc` / merge `f4c63cdd`は、rebase前から共通祖先だった。
+  timelineテストはv2.1.55と同一で、同じ修正がブランチ差分に重複していなかった。
+  したがって削除した重複ハンクは0件。#2261のimmediate / deferred両ケースとUI待機のassertをそのまま採用した。
+  根拠は差分なしの`timeline-vs-upstream.diff`。テストの削除・skip追加・assert緩和は行っていない。
+- 関連8ファイルの確認では#2261の2ケースだけが並列時に待機期限で失敗した。
+  同じ2ケースの単独実行は両方成功し、その後の全体実行でもこの2ケースは成功した。
+  テストは変更せず、並列時のフレーク候補として記録する。原因は確定していない。
+
+#### dev判定・識別子・macOSメニューの判断
+
+- 判定は`src/main/app-brand.ts`の`!app.isPackaged`の1箇所に集約したまま。
+  devは`Chat On Venice (dev)`、prodは`Chat On Venice`をmainが選び、既存AppState IPCでrendererへ渡す。
+  index.htmlのtitleとヘッダは動的表示で、ja / enカタログを直接検証する回帰テストを維持した。
+  productName`Chat On Steroids`とappId`com.chatonsteroids.app`は、ユーザーデータ保存先と既存識別を動かさないため据え置く。
+  macOSの開発起動の先頭メニューは本番名ではなく`Electron`と実測したため、このruntime名を許容する。
+  app.setNameで識別を変えず、devのAbout項目だけを識別可能な文言にする方針も維持した。
+- npm ci後にElectron runtimeが未展開だったため、インストール済み公式electronパッケージのinstall.jsで展開した。
+  設定や依存versionは変えていない。`npm ci`は成功し、既存依存のaudit表示は15件（8 moderate / 7 high）だった。
+  audit fixや無関係な依存更新は行っていない。
+- 8766固定、既存の専用runtimeで再起動した。実ウィンドウ名・ヘッダは`Chat On Venice (dev)`、
+  Aboutは同じ名前と`2.1.55`（runtime `44.3.0`）。Dockには新しいティール / 白のferroを実機で確認した。
+  根拠は`native-window.png` / `about.png` / `dock-live.png`。
+  /helloもversion 2.1.55 / bridge 15 / paired:trueだった。実Venice送信は行っていない。
+
+#### アイコンとインストーラ画像
+
+- `npm run icon`で16 / 22 / 32 / 48 / 128 / 256 / 512pxを再生成し、各サイズを目視した。
+  16pxタイル版は歯が詰まるが、22 / 32 / 48では輪郭が明確になり、128 / 256 / 512では歯と曲線が明瞭。
+  既存の白単色透過トレイ専用版を維持し、devのmacOSではこのtemplateを使う。
+  legacy ICO / PNG / BMPと拡張4サイズを含む生成一式も、実scriptを動かす回帰テストで確認した。
+- artworkには別の古いインストーラ用ヘッダ / サイドバー原画はない。
+  同じsource PNGから生成する`build/installerHeader.bmp`（150×57）と`installerSidebar.bmp`（164×314）は、
+  どちらも現在のferroへ更新されていることを目視した。寸法・teal画素の回帰テストも追加した。
+  根拠は`installer-branding.png`と`test/dev-icon.test.ts`。
+
+#### 検証結果と実行回数
+
+- `npm ci`、最終カタログでの`npm run typecheck` / `npm run build`は成功。
+  icon / headless画面確認も成功した。ログは`outputs/brand-rebase-2155/`に保存した。
+- 最初の全体実行は英語の`Restored {0} of {1} files|one`不足で1件失敗した。
+  診断には同じ`full-test.log`を使い、テストやassertは変えず英語カタログを補完した。
+  該当の既存source監査とbranding / iconの21テストは全て成功した。
+- 指定の「全体1回」に対して、初回が失敗したため、0 failedの受入を確認する最終候補でもう1回実行した。
+  合計2回の全体実行で、最終結果は**525 passed / 0 failed / 20 skipped**（ファイル）、
+  **12,853 passed / 0 failed / 218 skipped**（テスト）、終了コード0。
+  `final-full-test.log` / `final-full-test.exit`が根拠。#2261の2ケースも最終全体で成功した。
+- カタログの最終照合では、upstream 12ロケールの全キーと、2.1.55で追加された各41〜44キーの値を保持していた。
+  ja / enのdev / prod名はfallbackでなく直接登録を確認した（`catalog-audit.log`）。
+  git diffでテストファイルの削除・skip追加がないことも確認した。
+
+### 不明なこと・残る確認
+
+- 内蔵画面だけの現在のメニューバーでは、devのステータスアイコンが可視領域外に隠れている。
+  nativeのツールチップが表示された状態は未確認。hoverの実座標も確認したが、表示したとは記録しない。
+  他アプリの終了やOS設定の変更は行わず、アイコンが表示できる画面状態での目視確認を残す。
+  名前の設定経路は同じmainキーを使う回帰テストで確認済み。
+
+### 次に確認したいこと
+
+- ステータスアイコンが見える状態で、トレイのツールチップを目視する。

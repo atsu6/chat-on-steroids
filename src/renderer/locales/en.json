@@ -4113,5 +4113,18 @@
   "{0} expected files|one": "{0} expected file",
   "{0} steps waiting for you|one": "{0} step waiting for you",
   "File reading and search (core/read, core/find)": "File reading and search (core/read, core/find)",
-  "ファイルの読み取りと検索（core/read、core/find）": "File reading and search (core/read, core/find)"
+  "ファイルの読み取りと検索（core/read、core/find）": "File reading and search (core/read, core/find)",
+  "Restore turn": "Restore turn",
+  "Undo in Review": "Undo in Review",
+  "Some of these files were also edited in a later turn.": "Some of these files were also edited in a later turn.",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.",
+  "Restore a turn": "Restore a turn",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "Changed files can put a turn's edited files back, with Undo in Review.",
+  "Manage installed Skills": "Manage installed Skills",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Pause, re-enable or reveal an installed Skill from its card menu.",
+  "Free space per chat": "Free space per chat",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "The storage dialog shows what one chat uses and frees its images or long texts.",
+  "Safer after a crash": "Safer after a crash",
+  "Restored {0} of {1} files|one": "Restored {0} of {1} file",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted."
 }

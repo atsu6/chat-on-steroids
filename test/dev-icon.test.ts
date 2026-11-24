@@ -24,6 +24,13 @@ it('generates every review size, Retina tray templates and all existing icon out
   for (const file of ['build/icon.png', 'build/icon-preview.png', 'build/runtime-icon.png', 'build/installerHeader.bmp',
     'build/installerSidebar.bmp', 'artwork/trayTemplate.png', 'artwork/trayTemplate@2x.png',
     ...[16, 32, 48, 128].map(size => `extension/icons/icon${size}.png`)]) expect(existsSync(path.join(root, file)), file).toBe(true);
+  for (const [file, width, height] of [['installerHeader.bmp', 150, 57], ['installerSidebar.bmp', 164, 314]] as const) {
+    const bmp = readFileSync(path.join(root, 'build', file));
+    expect(bmp.toString('ascii', 0, 2)).toBe('BM');
+    expect(bmp.readInt32LE(18)).toBe(width);
+    expect(bmp.readInt32LE(22)).toBe(height);
+    expect(bmp.includes(Buffer.from([66, 62, 18])), `${file}: current teal branding`).toBe(true);
+  }
   // The generated source is RGBA/filter-0: template pixels must be white or transparent,
   // not a teal tile masquerading as a macOS template image.
   const png = readFileSync(path.join(root, 'artwork/trayTemplate.png'));
