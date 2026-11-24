@@ -4032,5 +4032,9 @@
   "Also allow writing": "同時允許寫入",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "允許在所選資料夾中建立、編輯、移動及刪除檔案。",
   "書き込みも許可する": "同時允許寫入",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "允許在所選資料夾中建立、編輯、移動及刪除檔案。"
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "允許在所選資料夾中建立、編輯、移動及刪除檔案。",
+  "Also allow running commands": "也允許執行命令",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice 可以使用你的權限執行命令。命令不會被隔離在所選資料夾內，也可以存取資料夾外的檔案和網路。",
+  "コマンドの実行も許可する": "也允許執行命令",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice 可以使用你的權限執行命令。命令不會被隔離在所選資料夾內，也可以存取資料夾外的檔案和網路。"
 }

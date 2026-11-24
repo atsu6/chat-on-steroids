@@ -1278,5 +1278,8 @@
     "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
   },
   "venice_patch_preview": {"message": "Änderungen vor dem Anwenden"},
-  "venice_patch_full_diff": {"message": "Vollständigen Diff anzeigen"}
+  "venice_patch_full_diff": {"message": "Vollständigen Diff anzeigen"},
+  "venice_exec_running": {"message": "Wird ausgeführt"},
+  "venice_exec_output_omitted": {"message": "Gekürzt: Nur die ersten 64KB der Ausgabe werden angezeigt."},
+  "venice_exec_output_error": {"message": "Ausgabe konnte nicht abgerufen werden. Beenden Sie diesen Lauf mit Stopp."}
 }

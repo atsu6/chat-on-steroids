@@ -1720,6 +1720,8 @@
         <p><button class="btn" id="veniceGrantPick" type="button" data-i18n="Choose folders">フォルダを選ぶ</button></p>
         <label style="display:flex;align-items:center;gap:8px;margin:12px 0"><input id="veniceGrantWrite" type="checkbox"><span data-i18n="Also allow writing">書き込みも許可する</span></label>
         <p data-i18n="Allow creating, editing, moving, and deleting files in the selected folders.">選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。</p>
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0"><input id="veniceGrantShell" type="checkbox" aria-describedby="veniceGrantShellWarning"><span data-i18n="Also allow running commands">コマンドの実行も許可する</span></label>
+        <p id="veniceGrantShellWarning" data-i18n="Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.">あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。</p>
         <ul id="veniceGrantRoots" style="overflow-wrap:anywhere"></ul>
         <p id="veniceGrantEmpty" data-i18n="Select the folders Venice may read.">読み取りを許可するフォルダーを選択してください。</p>
         <p class="plugin-error" id="veniceGrantError" role="alert" hidden></p>

@@ -1227,5 +1227,8 @@
     "message": "ワーカーの起動を準備している間にチャットに入力があったため、起動メッセージはそれを置き換えませんでした。"
   },
   "venice_patch_preview": {"message": "適用前の差分"},
-  "venice_patch_full_diff": {"message": "差分の全文を表示"}
+  "venice_patch_full_diff": {"message": "差分の全文を表示"},
+  "venice_exec_running": {"message": "実行中"},
+  "venice_exec_output_omitted": {"message": "省略：出力は先頭64KBまで表示します。"},
+  "venice_exec_output_error": {"message": "出力を取得できませんでした。停止ボタンでrunを終了できます。"}
 }

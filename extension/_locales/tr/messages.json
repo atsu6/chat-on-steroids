@@ -1278,5 +1278,8 @@
     "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
   },
   "venice_patch_preview": {"message": "Uygulamadan önceki farklar"},
-  "venice_patch_full_diff": {"message": "Tüm farkları göster"}
+  "venice_patch_full_diff": {"message": "Tüm farkları göster"},
+  "venice_exec_running": {"message": "Çalışıyor"},
+  "venice_exec_output_omitted": {"message": "Kısaltıldı: çıktının yalnızca ilk 64KB bölümü gösterilir."},
+  "venice_exec_output_error": {"message": "Çıktı alınamadı. Bu çalışmayı sonlandırmak için Durdur düğmesini kullanın."}
 }

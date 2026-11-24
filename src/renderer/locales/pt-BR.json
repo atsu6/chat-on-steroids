@@ -4202,5 +4202,9 @@
   "Also allow writing": "Permitir também a gravação",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "Permita criar, editar, mover e excluir arquivos nas pastas selecionadas.",
   "書き込みも許可する": "Permitir também a gravação",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Permita criar, editar, mover e excluir arquivos nas pastas selecionadas."
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Permita criar, editar, mover e excluir arquivos nas pastas selecionadas.",
+  "Also allow running commands": "Permitir também executar comandos",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "O Venice pode executar comandos com as suas permissões. Os comandos não ficam isolados nas pastas selecionadas e também podem acessar arquivos e a rede fora delas.",
+  "コマンドの実行も許可する": "Permitir também executar comandos",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "O Venice pode executar comandos com as suas permissões. Os comandos não ficam isolados nas pastas selecionadas e também podem acessar arquivos e a rede fora delas."
 }

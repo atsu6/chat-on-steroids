@@ -1329,5 +1329,8 @@
     "message": "Algo foi digitado no chat enquanto o despertar do worker era preparado, então o despertar não o substituiu."
   },
   "venice_patch_preview": {"message": "Diferenças antes de aplicar"},
-  "venice_patch_full_diff": {"message": "Mostrar todas as diferenças"}
+  "venice_patch_full_diff": {"message": "Mostrar todas as diferenças"},
+  "venice_exec_running": {"message": "Em execução"},
+  "venice_exec_output_omitted": {"message": "Omitido: apenas os primeiros 64KB da saída são exibidos."},
+  "venice_exec_output_error": {"message": "Não foi possível obter a saída. Use Parar para encerrar esta execução."}
 }

@@ -4032,5 +4032,9 @@
   "Also allow writing": "쓰기 작업도 허용",
   "Allow creating, editing, moving, and deleting files in the selected folders.": "선택한 폴더 안에서 파일 생성, 편집, 이동 및 삭제를 허용합니다.",
   "書き込みも許可する": "쓰기 작업도 허용",
-  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "선택한 폴더 안에서 파일 생성, 편집, 이동 및 삭제를 허용합니다."
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "선택한 폴더 안에서 파일 생성, 편집, 이동 및 삭제를 허용합니다.",
+  "Also allow running commands": "명령 실행도 허용",
+  "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "Venice는 사용자의 권한으로 명령을 실행할 수 있습니다. 명령은 선택한 폴더 안에 격리되지 않으며 폴더 밖의 파일과 네트워크에도 접근할 수 있습니다.",
+  "コマンドの実行も許可する": "명령 실행도 허용",
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "Venice는 사용자의 권한으로 명령을 실행할 수 있습니다. 명령은 선택한 폴더 안에 격리되지 않으며 폴더 밖의 파일과 네트워크에도 접근할 수 있습니다."
 }
