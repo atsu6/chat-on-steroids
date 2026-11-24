@@ -74,11 +74,11 @@ it.each([
   const { appBrand, appBrandAssetPath, refreshNativeBrand } = await import('../src/main/app-brand.js');
   const displayName = development ? name : APP_DISPLAY_NAME;
   expect(appBrand).toEqual({ development, displayName });
-  expect(appBrandAssetPath('icons/trayTemplate.png')).toBe(packaged ? '/resources/icons/trayTemplate.png' : '/app/build/icons/trayTemplate.png');
+  expect(appBrandAssetPath('icons/trayTemplate.png')).toBe(path.join(packaged ? '/resources' : '/app/build', 'icons/trayTemplate.png'));
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
   refreshNativeBrand(window as never);
   expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55',
-    ...(development ? {iconPath: packaged ? '/resources/runtime-icon.png' : '/app/build/runtime-icon.png'} : {}) });
+    ...(development ? {iconPath: path.join(packaged ? '/resources' : '/app/build', 'runtime-icon.png')} : {}) });
   expect(window.setTitle).toHaveBeenCalledWith(displayName);
   expect(native.app.setName).not.toHaveBeenCalled();
   if (development && process.platform === 'darwin') {
@@ -115,7 +115,7 @@ it('loads the generated dedicated macOS tray file and marks the NativeImage as a
     appBrand: { development: true }, process: { platform: 'darwin' }, path,
     appBrandAssetPath: (name: string) => path.join('/checkout/build', name), readFileSync, nativeImage: { createFromBuffer }
   })).toBe(image);
-  expect(readFileSync.mock.calls.map(([file]) => file)).toEqual(['/checkout/build/icons/trayTemplate.png', '/checkout/build/icons/trayTemplate@2x.png']);
+  expect(readFileSync.mock.calls.map(([file]) => file)).toEqual(['trayTemplate.png', 'trayTemplate@2x.png'].map(file => path.join('/checkout/build/icons', file)));
   expect(createFromBuffer).toHaveBeenCalledWith(one, { scaleFactor: 1 });
   expect(image.addRepresentation).toHaveBeenCalledWith({ scaleFactor: 2, dataURL: `data:image/png;base64,${two.toString('base64')}` });
   expect(image.setTemplateImage).toHaveBeenCalledWith(true);

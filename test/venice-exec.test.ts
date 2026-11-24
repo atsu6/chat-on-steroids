@@ -21,7 +21,13 @@ import type { VeniceToolCallRequest, VeniceRunGrant, VeniceExecOutput } from '..
 
 let base: string, root: string, outside: string, sessionId: string, port: number;
 const sender: VeniceSender = { browserId: 'a'.repeat(32), tabId: 8, documentId: 'synthetic-exec-document' };
-const request = (runId: string, cmd = 'echo synthetic', args = {}): VeniceToolCallRequest => ({ runId, callId: randomUUID(), surface: 'core', tool: 'exec_command', args: { cmd, login: false, ...args } });
+// Exercise the native shell on every OS, but produce fixture bytes with Node, not POSIX utilities.
+const nodeCommand = (script: string) => {
+  const windows = process.platform === 'win32';
+  const quote = (value: string) => `'${value.replaceAll("'", windows ? "''" : "'\\''")}'`;
+  return `${windows ? '& ' : ''}${quote(process.execPath)} -e ${quote(script)}`;
+};
+const request = (runId: string, cmd = nodeCommand('process.stdout.write("synthetic\\n")'), args = {}): VeniceToolCallRequest => ({ runId, callId: randomUUID(), surface: 'core', tool: 'exec_command', args: { cmd, login: false, ...args } });
 const runs: string[] = [];
 const grant = async (write = false, shell = true) => { const g = await gateway.grant(sessionId, [root], sender, write, shell); runs.push(g.runId); return g; };
 const result = (reply: unknown): VeniceExecOutput => {
@@ -52,7 +58,7 @@ it('keeps shell OFF for read and write grants and refuses exec without spawning'
 
 it('runs echo through host_admitted in the first grant root with separate output and no write upgrade', async () => {
   const g = await grant(); expect(g.write).toBeUndefined(); expect(g.tools).toEqual(['core/read', 'core/exec_command']);
-  const req = request(g.runId, 'pwd; printf "line1\\nline2\\n"; printf "diagnostic\\n" >&2');
+  const req = request(g.runId, nodeCommand('process.stdout.write(process.cwd()+"\\nline1\\nline2\\n");process.stderr.write("diagnostic\\n")'));
   const output = result(await gateway.call(req, sender));
   expect(output).toMatchObject({ exitCode: 0, running: false, stdout: root + '\nline1\nline2\n', stderr: 'diagnostic\n', truncated: false });
   const events = (await readEvents(sessionId, { limit: 100 })).filter(event => event.kind === 'tool_call');
@@ -68,11 +74,11 @@ it('rejects native, virtual, traversal and symlink cwd escapes, including anothe
     expect((await gateway.call(request(g.runId, 'echo no', { workdir }), sender)).result).toMatchObject({ isError: true });
   }
   expect(spawn).not.toHaveBeenCalled();
-  for (const workdir of ['/granted/sub', 'sub']) expect(result(await gateway.call(request(g.runId, 'pwd', { workdir }), sender)).stdout).toBe(path.join(root, 'sub') + '\n');
+  for (const workdir of ['/granted/sub', 'sub']) expect(result(await gateway.call(request(g.runId, nodeCommand('process.stdout.write(process.cwd()+"\\n")'), { workdir }), sender)).stdout).toBe(path.join(root, 'sub') + '\n');
 });
 
 it('joins concurrent identical callIds, replays after revoke and rejects changed owner or arguments', async () => {
-  const g = await grant(), req = request(g.runId, 'echo once >> once.txt; echo received');
+  const g = await grant(), req = request(g.runId, nodeCommand('require("node:fs").appendFileSync("once.txt","once\\n");process.stdout.write("received\\n")'));
   const [a, b] = await Promise.all([gateway.call(req, sender), gateway.call(req, sender)]); result(a); expect(b).toEqual(a);
   expect(await fs.readFile(path.join(root, 'once.txt'), 'utf8')).toBe('once\n');
   gateway.revoke(g.runId); expect(await gateway.call(req, sender)).toEqual(a);
@@ -94,7 +100,7 @@ it('enforces the existing command allowlist and live command capability', async 
 
 it('retains a shared 64KiB prefix budget, drops the tail and keeps stderr separate', async () => {
   const g = await grant();
-  const output = result(await gateway.call(request(g.runId, "printf 'error-line\\n' >&2; sleep 0.1; head -c 70000 /dev/zero | tr '\\000' x; printf TAIL"), sender));
+  const output = result(await gateway.call(request(g.runId, nodeCommand('process.stderr.write("error-line\\n");setTimeout(()=>process.stdout.write("x".repeat(70000)+"TAIL"),100)')), sender));
   expect(output.stderr).toBe('error-line\n'); expect(output.stdout.startsWith('xxx')).toBe(true);
   expect(output.stdout).not.toContain('TAIL'); expect(output.stdout + output.stderr).toHaveLength(65536);
   expect(output.truncated).toBe(true); expect(output.omittedBytes).toBe(70000 + 4 + 11 - 65536);
@@ -102,7 +108,7 @@ it('retains a shared 64KiB prefix budget, drops the tail and keeps stderr separa
 
 it('applies the existing secrets shield to both the exec result and live output observations', async () => {
   const g = await grant(); const synthetic = 'sk-' + 'SyntheticOnly'.repeat(4);
-  const req = request(g.runId, `printf '${synthetic}\\n'; printf '${synthetic}\\n' >&2; sleep 0.1`);
+  const req = request(g.runId, nodeCommand(`process.stdout.write(${JSON.stringify(synthetic + '\n')});process.stderr.write(${JSON.stringify(synthetic + '\n')});setTimeout(()=>{},100)`));
   const output = result(await gateway.call(req, sender));
   for (const snapshot of [output, (await gateway.execOutput(req, sender))!]) {
     expect(snapshot.stdout).not.toContain(synthetic); expect(snapshot.stderr).not.toContain(synthetic);
@@ -111,7 +117,7 @@ it('applies the existing secrets shield to both the exec result and live output 
 });
 
 it('keeps the published 64KiB limit even when the secrets shield expands repeated short settings', async () => {
-  const g = await grant(), req = request(g.runId, `awk 'BEGIN { for(i=0;i<2500;i++) print "API_TOKEN=abcdefgh12345678" }'`);
+  const g = await grant(), req = request(g.runId, nodeCommand('process.stdout.write("API_TOKEN=abcdefgh12345678\\n".repeat(2500))'));
   const output = result(await gateway.call(req, sender));
   for (const snapshot of [output, (await gateway.execOutput(req, sender))!]) {
     expect(Buffer.byteLength(snapshot.stdout) + Buffer.byteLength(snapshot.stderr)).toBeLessThanOrEqual(65536);
@@ -126,7 +132,7 @@ it('defaults wait to 10 seconds and caps explicit waits at 30 seconds without ch
 });
 
 it('yields a live processId, streams before the first answer and observes later completion without new execution', async () => {
-  const g = await grant(), req = request(g.runId, 'echo early; sleep 1.5; echo late; echo err >&2', { yield_time_ms: 250 });
+  const g = await grant(), req = request(g.runId, nodeCommand('process.stdout.write("early\\n");setTimeout(()=>{process.stdout.write("late\\n");process.stderr.write("err\\n")},1500)'), { yield_time_ms: 250 });
   const call = gateway.call(req, sender);
   await vi.waitFor(async () => expect((await gateway.execOutput(req, sender))?.stdout).toContain('early\n'));
   const output = result(await call); expect(output.running).toBe(true); expect(output.exitCode).toBeNull(); expect(output.stdout).toBe('early\n');
@@ -139,7 +145,7 @@ it('yields a live processId, streams before the first answer and observes later 
 
 it('reserves a maximum of three live/spawning processes per run and frees slots on exit', async () => {
   const g = await grant();
-  const calls = Array.from({ length: 4 }, () => request(g.runId, 'sleep 2', { yield_time_ms: 250 }));
+  const calls = Array.from({ length: 4 }, () => request(g.runId, nodeCommand('setTimeout(()=>{},2000)'), { yield_time_ms: 250 }));
   const replies = await Promise.all(calls.map(req => gateway.call(req, sender)));
   for (const reply of replies.slice(0, 3)) expect(result(reply).running).toBe(true);
   expect(replies[3]).toMatchObject({ result: { isError: true, content: [{ text: expect.stringContaining('EXEC_LIMIT') }] } });
@@ -150,7 +156,14 @@ it('reserves a maximum of three live/spawning processes per run and frees slots 
 
 it('revoke kills this run and its descendants, but leaves another run alive', async () => {
   const a = await grant(), b = await grant();
-  const start = async (runId: string, file: string) => result(await gateway.call(request(runId, `sh -c 'echo $$ > ${file}; sleep 30' & wait`, { yield_time_ms: 250 }), sender));
+  const start = async (runId: string, file: string) => {
+    const child = `require("node:fs").writeFileSync(${JSON.stringify(file)},String(process.pid));process.stdout.write(process.pid+"\\n");setTimeout(()=>{},30000)`;
+    const req = request(runId, nodeCommand(`require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(child)}],{stdio:"inherit"})`), { yield_time_ms: 250 });
+    const output = result(await gateway.call(req, sender));
+    // The descendant's stdout receipt follows its PID-file write; no startup sleep or PID-file polling.
+    await vi.waitFor(async () => expect((await gateway.execOutput(req, sender))?.stdout).toMatch(/^\d+\n/), { timeout: 5000 });
+    return output;
+  };
   const owned = await start(a.runId, 'owned.pid'), other = await start(b.runId, 'other.pid');
   const pid = Number(await fs.readFile(path.join(root, 'owned.pid'), 'utf8'));
   gateway.revoke(a.runId); await gateway.waitForRevocation();
@@ -174,7 +187,7 @@ it('persists explicit shell consent without implying write or upgrading earlier 
 });
 
 it('uses the authenticated HTTP gateway for exec, output observation and Stop/revoke', async () => {
-  const g = await grant(), req = request(g.runId, 'echo http; sleep 30', { yield_time_ms: 250 });
+  const g = await grant(), req = request(g.runId, nodeCommand('process.stdout.write("http\\n");setTimeout(()=>{},30000)'), { yield_time_ms: 250 });
   const post = (url: string, body: unknown) => fetch(`http://127.0.0.1:${port}${url}`, { method: 'POST', headers: {
     'Content-Type': 'application/json', authorization: 'Bearer synthetic-exec-token', 'x-extension-protocol': String(BRIDGE_PROTOCOL), 'x-extension-browser': sender.browserId
   }, body: JSON.stringify(body) });
@@ -186,7 +199,7 @@ it('uses the authenticated HTTP gateway for exec, output observation and Stop/re
 });
 
 it('app shutdown kills every remaining run, including an exec still awaiting its first result', async () => {
-  const g = await grant(), req = request(g.runId, 'echo shutdown; sleep 30'); const reply = gateway.call(req, sender);
+  const g = await grant(), req = request(g.runId, nodeCommand('process.stdout.write("shutdown\\n");setTimeout(()=>{},30000)')); const reply = gateway.call(req, sender);
   await vi.waitFor(async () => expect((await gateway.execOutput(req, sender))?.stdout).toContain('shutdown'));
   await gateway.stop(); await reply;
   expect(unifiedExecManager.listProcesses()).toHaveLength(0);

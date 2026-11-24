@@ -34,7 +34,7 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, 'hits.txt'), 'heading\nneedle first\nnot this\nneedle second <img src=x>\n');
   await fs.writeFile(path.join(root, 'many.txt'), Array.from({ length: 201 }, (_, i) => `crowd ${i}`).join('\n') + '\n');
   await fs.writeFile(path.join(root, 'exact.txt'), Array.from({ length: 200 }, (_, i) => `exact ${i}`).join('\n') + '\n');
-  await fs.writeFile(path.join(root, 'nul.txt'), 'needle\0binary');
+  await fs.writeFile(path.join(root, 'nul-containing.txt'), 'needle\0binary');
   await fs.writeFile(path.join(root, 'binary.bin'), Buffer.from([0, 1, 2, ...Buffer.from('needle')]));
   await fs.writeFile(path.join(root, 'utf16.txt'), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('heading\nneedle UTF16\n', 'utf16le')]));
   await fs.writeFile(path.join(outside, 'private.txt'), 'outside-only needle\n');
@@ -108,7 +108,7 @@ it('clips above 200 matches by default, but does not mark an exactly full result
 
 it('skips NUL-marked binary files, but decodes BOM-marked UTF16 without leaking NUL', async () => {
   const g = await grant();
-  for (const name of ['nul.txt', 'binary.bin']) expect(result(await gateway.call(request(g.runId, { path: `/granted/${name}` }), sender))).toMatchObject({ matches: [], binaryPolicy: 'skip' });
+  for (const name of ['nul-containing.txt', 'binary.bin']) expect(result(await gateway.call(request(g.runId, { path: `/granted/${name}` }), sender))).toMatchObject({ matches: [], binaryPolicy: 'skip' });
   const response = await gateway.call(request(g.runId, { path: '/granted/utf16.txt' }), sender);
   expect(result(response).matches).toEqual([{ path: '/granted/utf16.txt', line: 2, text: 'needle UTF16' }]);
   expect(JSON.stringify(response)).not.toContain('\\u0000');

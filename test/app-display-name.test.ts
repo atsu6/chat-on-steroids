@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { load as loadYaml } from 'js-yaml';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -72,7 +73,7 @@ it.each([
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
   refreshNativeBrand(window as never);
   expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55',
-    ...(development ? { iconPath: packaged ? '/resources/runtime-icon.png' : '/app/build/runtime-icon.png' } : {}) });
+    ...(development ? { iconPath: path.join(packaged ? '/resources' : '/app/build', 'runtime-icon.png') } : {}) });
   expect(window.setTitle).toHaveBeenCalledWith(displayName);
   expect(native.app.setName).not.toHaveBeenCalled();
   if (development && process.platform === 'darwin') {
