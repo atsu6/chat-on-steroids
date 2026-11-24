@@ -1281,5 +1281,5 @@
   "venice_patch_full_diff": {"message": "Vollständigen Diff anzeigen"},
   "venice_exec_running": {"message": "Wird ausgeführt"},
   "venice_exec_output_omitted": {"message": "Gekürzt: Nur die ersten 64KB der Ausgabe werden angezeigt."},
-  "venice_exec_output_error": {"message": "Ausgabe konnte nicht abgerufen werden. Beenden Sie diesen Lauf mit Stopp."}
+  "venice_exec_output_error": {"message": "Ausgabe konnte nicht abgerufen werden. Beende diesen Lauf mit Stopp."}
 }
