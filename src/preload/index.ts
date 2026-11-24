@@ -120,7 +120,7 @@ const api = {
   veniceContext: (sessionId: string | null) => call<void>('venice:context', { sessionId }),
   veniceGrantPending: () => call<VeniceGrantPending[]>('venice:grantPending'),
   veniceGrantPick: (id: string) => call<VeniceGrantPending[]>('venice:grantPick', { id }),
-  veniceGrantAnswer: (id: string, allow: boolean, write = false) => call<void>('venice:grantAnswer', { id, allow, ...(write ? { write: true } : {}) }),
+  veniceGrantAnswer: (id: string, allow: boolean, write = false, shell = false) => call<void>('venice:grantAnswer', { id, allow, ...(write ? { write: true } : {}), ...(shell ? { shell: true } : {}) }),
   onVeniceGrantPending: (listener: (pending: VeniceGrantPending[]) => void): (() => void) => {
     const wrapped = (_event: unknown, pending: VeniceGrantPending[]): void => listener(pending);
     ipcRenderer.on('venice:grantPending', wrapped);

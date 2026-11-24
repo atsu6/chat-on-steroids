@@ -83,7 +83,9 @@ export interface HostAdmittedOrigin {
   type: 'venice';
   write?: boolean;
   preview?: boolean;
-  tool?: 'read' | 'apply_patch';
+  shell?: boolean;
+  exec?: import('../venice-exec.js').VeniceExecLease;
+  tool?: 'read' | 'apply_patch' | 'exec_command';
   runId: string;
   sessionId: string;
   roots: Root[];

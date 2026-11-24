@@ -253,6 +253,8 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 
 /** One stable owner for the running model turn, upgraded lazily when page proof arrives. */
 function execPrincipal(): string | null {
+  const host = currentCall()?.origin;
+  if (host?.type === 'venice') return `venice:${host.runId}`;
   const caller = currentCaller();
   return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
@@ -807,6 +809,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async (input) =>
         reg.guarded('command', 'exec_command', async () => {
+          const host = currentCall()?.origin;
+          const venice = host?.type === 'venice' ? host : undefined;
+          if (venice && (input.tty === true || input.cmds !== undefined)) return fail('INVALID_ARGUMENT: Venice exec accepts one cmd and separate stdout/stderr pipes (tty=false).');
           const dir = await resolveCwd(ctx, input.workdir);
           const rawCommands = input.cmd === undefined ? input.cmds! : [input.cmd];
           const isBatch = input.cmd === undefined;
@@ -928,7 +933,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
-            if (!isBatch) {
+            if (!isBatch && !venice) {
               const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
               if (interceptedPatch.kind === 'correctness_error') {
                 return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
@@ -961,7 +966,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
             const owner = execPrincipal();
             const unread = backgroundExecObligations(owner).exitedUnread;
-            if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
+            if (!venice && unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
               const sessionIds = unread.map((session) => session.processId).join(', ');
               return fail(
                   `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
@@ -995,7 +1000,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               : deriveExecArgs(shell,
                 withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
             await validatedWorkspace();
+            if (venice && (!venice.current() || !venice.shell || !effectiveCapabilities(getConfig()).command)) {
+              unifiedExecManager.releaseProcessId(processId); return fail('RUN_REVOKED_OR_COMMAND_DISABLED');
+            }
+            if (venice?.exec) venice.exec.processId = processId;
             const output = await unifiedExecManager.execCommand({
+              observer: venice?.exec?.observer,
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
                 const sections = parseCommandBatchSections(rawOutput, batch.marker);
@@ -1008,13 +1018,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               shellType: shell.shellType,
               hookCommand: commandDetail,
               processId,
-              yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
+              yieldTimeMs: venice ? Math.min(input.yield_time_ms ?? 10_000, 30_000) : input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
               maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
               cwd: server ? os.tmpdir() : dir.real,
               displayCwd: dir.virtual,
               env: execChildEnvironment(),
-              tty: input.tty ?? DEFAULT_TTY
+              tty: venice ? false : input.tty ?? DEFAULT_TTY
             });
             // Which exact session or temporary request principal may later write to this
             // process id. Request custody upgrades lazily when exact correlation arrives.
@@ -1045,6 +1055,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             });
             noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
             logInfo(`tool exec_command ${shell.shellType} -> ${output.processId ?? `exit ${output.exitCode ?? 'unknown'}`}`);
+            if (venice?.exec) {
+              const snapshot = venice.exec.snapshot();
+              const text = `Process ID: ${snapshot.processId}\nExit code: ${output.exitCode ?? 'running'}\nstdout:\n${snapshot.stdout}\nstderr:\n${snapshot.stderr}` + (snapshot.truncated ? '\n[output truncated]' : '');
+              return { content: [{ type: 'text' as const, text }], structuredContent: { ...snapshot, exitCode: output.exitCode, running: output.processId !== null,
+                output: { stdout: snapshot.stdout, stderr: snapshot.stderr } } };
+            }
             // `benign` was previously spent only on the error count, leaving the model to read
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.

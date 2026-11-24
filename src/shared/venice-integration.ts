@@ -58,6 +58,8 @@ export interface VeniceRunGrant {
   tools: string[];
   /** Omitted/false on existing read grants; only explicit app consent enables writes. */
   write?: boolean;
+  /** Independent explicit shell consent; never implied by read or write. */
+  shell?: boolean;
   /** Approved filesystem roots; this list does not sandbox a shell process. */
   roots: string[];
 }
@@ -74,3 +76,16 @@ export interface VeniceGrantPending {
   roots: string[];
 }
 export type VeniceGrantReply = { runId: string } | { error: string };
+
+
+/** Bounded cumulative process output, not an stdin/continuation capability. */
+export interface VeniceExecOutput {
+  callId: string;
+  processId: number | null;
+  exitCode: number | null;
+  running: boolean;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  omittedBytes: number;
+}

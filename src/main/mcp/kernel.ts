@@ -1426,10 +1426,11 @@ export async function resolveIn(
     if (!host.current()) throw new SandboxError('RUN_REVOKED');
     const live = effectiveCapabilities(getConfig());
     if (host.tool === 'apply_patch' && (!host.write || !(live.create || live.edit || live.move || live.deleteFile))) throw new SandboxError('TOOL_DISABLED: changing files is not permitted.');
-    if ((host.tool !== 'apply_patch' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
+    if (host.tool === 'exec_command' && (!host.shell || !live.command)) throw new SandboxError('TOOL_DISABLED: command execution is not permitted.');
+    if ((host.tool === 'read' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
     // No implicit managed/user-Skill roots or learned ChatGPT cwd on this surface.
     // The ordinary resolver still owns canonical paths, traversal and symlinks.
-    return resolvePath(host.roots, requested, { ...options, base: options.base ?? null });
+    return resolvePath(host.roots, requested, { ...options, base: options.base ?? (host.tool === 'exec_command' && host.roots[0] ? `/${host.roots[0].name}` : null) });
   }
   // The user's own Skill folders are served only to read tools, and never become a workspace.
   if (isUserSkillVirtualPath(requested)) {
@@ -1611,12 +1612,13 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     registered: () => [...names],
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
     async invokeHostAdmitted(name, args, origin) {
-      // Host admission never lends its identity to shell, Desktop or lifecycle tools.
-      if (surface !== 'core' || !['read', 'apply_patch'].includes(name)) return fail('UNKNOWN_TOOL: only core/read and core/apply_patch are admitted.');
+      // Host admission has an explicit tool allowlist; shell never follows from file permission.
+      if (surface !== 'core' || !['read', 'apply_patch', 'exec_command'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
       if (name === 'apply_patch' && origin.write !== true) return fail('TOOL_NOT_GRANTED');
+      if (name === 'exec_command' && (origin.shell !== true || !origin.exec)) return fail('TOOL_NOT_GRANTED');
       const reading = name === 'read' || origin.preview === true;
       const context: CallContext = {
-        origin: { ...origin, tool: name as 'read' | 'apply_patch' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
+        origin: { ...origin, tool: name as 'read' | 'apply_patch' | 'exec_command' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
         allowUnattributed: false, evidence: emptyEvidence(), outcome: null,
         publication: { completedAt: null, failed: false },
         caller: { transportKey: `venice:${origin.runId}`, requestId: null,
@@ -1626,6 +1628,7 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
         const session = await getSession(origin.sessionId);
         if (!session || session.conversationId || session.endedAt) return fail('VENICE_SESSION_UNAVAILABLE');
         if (!origin.current()) return fail('RUN_REVOKED');
+        if (name === 'exec_command' && (!caps.command || !effectiveCapabilities(getConfig()).command)) return fail('TOOL_DISABLED: command execution is not permitted.');
         if (reading && (!caps.read || !effectiveCapabilities(getConfig()).read)) return fail('TOOL_DISABLED: read requires reading permission.');
         const entry = handlers.get(name);
         const result = await guard(name, async () => {
