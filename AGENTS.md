@@ -7107,3 +7107,86 @@ API 移行など次の方針はユーザーの判断を待つ。
 `app-palette.js` は 2.1.54 では manifest 登録の ISOLATED スクリプトであり、
 ページ JS を注入するヘルパーではない。Venice の fetch 観測は `usage.js` と同じ
 manifest 登録の MAIN / document_start を使い、palette 本体は変更しない。
+
+---
+
+# Venice 移植ブランチの規則
+
+## 目的
+Chat On Steroids の接続先を ChatGPT から venice.ai に差し替える。
+新しいアプリは作らない。Electronシェル、MCPツール、承認ゲート、通知、多言語、
+プロジェクト管理はすべて流用する。
+
+## 決定事項（蒸し返さない）
+- 送信は Venice の Web UI 経由。API への移行は、規約違反の警告が出るまで検討しない。
+- 判断根拠は docs/adr/0001-venice-web-transport.md。着手前に必ず読む。
+- 「APIの方が良いのでは」で止まらない。ADR が決定済み。
+
+## 事実と不明の区別
+- 実測した事実と、未確認の推測を混ぜない。未確認は「未確認」と書く。
+- 数値・ID・ヘッダ名を推測で埋めない。空欄のまま残す。
+- 未解明のまま先へ進む項目は、findings に「未解明のまま引き継ぐ」と明記する。
+- 現在の既知の未解明項目: private endpoint 直叩きの403の原因、§12(d) の解釈、
+  attestation と認証ヘッダの要否、サーバ側の履歴保持、Content-Type。
+
+## 編集してよい範囲
+- extension/manifest.json（venice 用エントリのみ）
+- extension/venice-*.js（新規・既存とも）
+- extension/content.js（アダプタ登録の分岐のみ）
+- extension/venice-bridge.js（新規）
+- extension/background.js（Venice 用メッセージ分岐の追加のみ）
+- extension/usage.js（Venice ホスト分岐のみ）
+- docs/、fixtures/、test/（Venice 関連の追加・更新のみ）
+
+## 編集してはいけない
+- src/ 配下（Electron 側。必要になったら理由を書いて提案）
+- chatgpt-dom.js、fiber.js 本体。ChatGPT 対応を壊さない
+- 依存パッケージの追加。必要なら理由を書いて提案だけする
+
+## 実装の型
+- ページ文脈の実行は、既存の manifest による MAIN / document_start 注入に倣う
+- ネットワーク傍受は usage.js の分岐から venice-recon.js を設置する現行方式を維持
+- 応答は必ず clone を読む。元の Response を消費しない
+- fetch は元実装へ1回だけ渡し、元の Promise を返す
+
+## プロトコル
+- SSE は venice-sse.js のパーサだけを使う。独自実装を書かない
+- 本文は output_index 1 の delta のみ。0 は reasoning として別に保持する
+- 終端は response.completed。data: [DONE] 単独は正常終了として扱わない
+- 壊れた JSON 行は捨てて続行する
+
+## エラーと制御
+- 429 は x-ratelimit-reset 系ヘッダの時刻まで待つ。連打しない
+- 401 とログイン画面遷移は isAlive() で false。ループを止めて通知する
+- 1タスクの連続ステップ上限を必ず設ける。既定10、デスクトップは最大40
+- セッションが切れたら静かに死なせない。停止理由を残す
+
+## テスト
+- 送信を伴わないテストは fixture に依存させない。合成データだけで通るようにする
+- 実 fixture を使うテストは、fixture 不在なら skip する
+- 送信を伴う検証は1タスクあたり1〜2回に抑える
+
+## Git
+- タスク単位で commit する。メッセージは英語の命令形1行
+- push は指示があるまでしない
+- 認証情報と session ID を含む実 fixture は Git 除外を維持する
+- 実 fixture をコミットしない。fixtures/.gitignore を変更しない
+
+## 報告
+- 最後に必ず「分かったこと / 不明なこと / 次に確認したいこと」を docs/venice-findings.md に追記する
+- 事実と推測を分けて書く。根拠の record number を併記する
+- 詰まったら、どこで詰まったかを書いて止まる。回避策を勝手に作らない
+
+## 言語
+- ドキュメントとコミット以外の報告は日本語
+
+## Electron 統合（A案）の範囲
+- 承認済みの変更対象: extension/venice-*.js、extension/background.js（Venice分岐）、
+  src/main/bridge.ts、src/main/venice-tool-gateway.ts（新規）、src/shared/venice-integration.ts（新規）、
+  src/main/mcp/kernel.ts、src/main/mcp/call-context.ts、src/main/session/recorder.ts、
+  src/main/session/store.ts、src/shared/session.ts、src/main/ipc.ts、src/preload/index.ts、
+  src/renderer/chat.ts、src/renderer/index.html、src/main/index.ts
+- それ以外の src/ は、理由を書いて提案してから触る。
+- 承認UIの文言は「あなたの権限でコマンドを実行できる」と明示する。フォルダ内に隔離されるとは書かない。
+- shell の権限を、ファイルツールの権限説明と混同しない。
+- 最初の実装は read のみ。apply_patch、exec_command、write_stdin、find、Desktop は段階的に追加する。
