@@ -7190,3 +7190,7 @@ Chat On Steroids の接続先を ChatGPT から venice.ai に差し替える。
 - 承認UIの文言は「あなたの権限でコマンドを実行できる」と明示する。フォルダ内に隔離されるとは書かない。
 - shell の権限を、ファイルツールの権限説明と混同しない。
 - 最初の実装は read のみ。apply_patch、exec_command、write_stdin、find、Desktop は段階的に追加する。
+
+## Venice: 言語
+言語方針は `docs/venice-i18n-decision.md` に従う。
+当面は12言語を維持し、2.1.55取り込み後にja + enと英語フォールバックへの切り替えを判断する。
