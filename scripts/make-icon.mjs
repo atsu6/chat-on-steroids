@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
 const EXTENSION_SIZES = [128, 48, 32, 16];
+const REVIEW_SIZES = [16, 22, 32, 48, 128, 256, 512];
 const SOURCE_PATH = path.join(root, 'artwork', 'app-icon-source.png');
 const INK = [18, 62, 66];
 const PAPER = [255, 255, 255];
@@ -154,14 +155,14 @@ function sourceMask() {
 const visibleSource = sourceMask();
 
 /** Tight square crop with deliberate breathing room, derived from visible source alpha. */
-function sourceCrop() {
+function sourceCrop(mask = visibleSource) {
   let left = source.width;
   let top = source.height;
   let right = -1;
   let bottom = -1;
   for (let y = 0; y < source.height; y++) {
     for (let x = 0; x < source.width; x++) {
-      if (visibleSource[y * source.width + x] === 0) continue;
+      if (mask[y * source.width + x] === 0) continue;
       left = Math.min(left, x);
       top = Math.min(top, y);
       right = Math.max(right, x);
@@ -184,14 +185,14 @@ const crop = sourceCrop();
  * Area-resample the two-colour source in the development palette.
  * Premultiplied accumulation keeps transparent edges clean.
  */
-function render(size) {
+function render(size, mask = visibleSource, region = crop) {
   const pixels = Buffer.alloc(size * size * 4);
   for (let py = 0; py < size; py++) {
-    const y0 = crop.top + (py * crop.side) / size;
-    const y1 = crop.top + ((py + 1) * crop.side) / size;
+    const y0 = region.top + (py * region.side) / size;
+    const y1 = region.top + ((py + 1) * region.side) / size;
     for (let px = 0; px < size; px++) {
-      const x0 = crop.left + (px * crop.side) / size;
-      const x1 = crop.left + ((px + 1) * crop.side) / size;
+      const x0 = region.left + (px * region.side) / size;
+      const x1 = region.left + ((px + 1) * region.side) / size;
       let alphaWeight = 0;
       let totalWeight = 0;
       const premultiplied = [0, 0, 0];
@@ -203,8 +204,11 @@ function render(size) {
           const xWeight = Math.min(x1, sx + 1) - Math.max(x0, sx);
           const weight = Math.max(0, xWeight) * Math.max(0, yWeight);
           if (weight === 0) continue;
+          // Transparent mask pixels still occupy area: excluding them makes small
+          // template teeth/gaps fill in instead of antialiasing at 16px.
+          totalWeight += weight;
           const sourceIndex = sy * source.width + sx;
-          if (visibleSource[sourceIndex] === 0) continue;
+          if (mask[sourceIndex] === 0) continue;
           const at = sourceIndex * 4;
           const alpha = source.pixels[at + 3] / 255;
           const luminance =
@@ -214,7 +218,6 @@ function render(size) {
             premultiplied[channel] += colour[channel] * alpha * weight;
           }
           alphaWeight += alpha * weight;
-          totalWeight += weight;
         }
       }
       const output = (py * size + px) * 4;
@@ -374,3 +377,19 @@ for (const size of EXTENSION_SIZES) {
   writeFileSync(path.join(iconsDir, `icon${size}.png`), pngFor(size));
 }
 console.log(`Wrote extension/icons/icon{${EXTENSION_SIZES.join(',')}}.png`);
+
+// Complete review sizes, plus a larger transparent ferro for the 16px macOS tray.
+// The template excludes the teal tile and uses the same original white silhouette.
+const reviewDir = path.join(root, 'build', 'icons');
+mkdirSync(reviewDir, { recursive: true });
+const ferroMask = Uint8Array.from(visibleSource, (visible, index) =>
+  visible && source.pixels[index * 4] >= 128 ? 1 : 0);
+const ferroCrop = sourceCrop(ferroMask);
+for (const size of REVIEW_SIZES) {
+  writeFileSync(path.join(reviewDir, `icon${size}.png`), pngFor(size));
+  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), encodePng(size, render(size, ferroMask, ferroCrop)));
+}
+for (const [size, filename] of [[16, 'trayTemplate.png'], [32, 'trayTemplate@2x.png']]) {
+  writeFileSync(path.join(root, 'artwork', filename), encodePng(size, render(size, ferroMask, ferroCrop)));
+}
+console.log(`Wrote build/icons/icon{${REVIEW_SIZES.join(',')}}.png, ferro-template variants and artwork/trayTemplate{,@2x}.png`);

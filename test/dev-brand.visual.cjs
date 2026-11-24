@@ -30,29 +30,32 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
       return route.fulfill({path: file});
     });
     await page.goto('https://local.test/');
-    const bundle = await esbuild.build({entryPoints: [path.join(root, 'src/renderer/i18n.ts')], bundle: true, write: false, format: 'iife', globalName: 'language'});
+    const bundle = await esbuild.build({stdin: {contents: "export * from './src/renderer/i18n.ts'; export {applyAppBrand} from './src/renderer/app-brand.ts';", resolveDir: root}, bundle: true, write: false, format: 'iife', globalName: 'language'});
     await page.addScriptTag({content: bundle.outputFiles[0].text});
     await page.evaluate(() => language.initLanguage());
     await page.evaluate(() => document.fonts.ready);
     for (const width of [1280, 800]) {
       await page.setViewportSize({width, height: 900});
       for (const locale of ['en', 'ja']) {
+       for (const displayName of ['Chat On Venice (dev)', 'Chat On Venice']) {
+        await page.evaluate(name => language.applyAppBrand(name), displayName);
         await page.evaluate(locale => language.setLanguage(locale), locale);
-        assert.equal(await page.title(), 'Chat On Venice (dev)');
+        assert.equal(await page.title(), displayName);
         const brand = page.locator('.sidebar-brand strong');
-        assert.equal(await brand.innerText(), 'Chat On Venice (dev)');
+        assert.equal(await brand.innerText(), displayName);
         assert.equal(await brand.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'brand text must not clip');
         const search = await page.locator('#searchChatsButton').boundingBox();
         const sidebar = await page.locator('.sidebar').boundingBox();
         assert(search.x + search.width <= sidebar.x + sidebar.width, 'search button must remain inside sidebar');
-        await page.screenshot({path: path.join(output, `shell-${width}-${locale}.png`)});
+        await page.screenshot({path: path.join(output, `shell-${width}-${locale}-${displayName.endsWith('(dev)') ? 'dev' : 'prod'}.png`)});
       }
     }
-    await page.setViewportSize({width: 720, height: 340});
-    await page.setContent(`<style>body{margin:32px;background:#eee;display:flex;gap:28px;align-items:center;font:14px system-ui}img{image-rendering:auto}</style>` +
-      [256, 128, 48, 32, 16].map(size => `<figure style="margin:0;text-align:center"><img width="${size}" height="${size}" src="data:image/png;base64,${fs.readFileSync(path.join(root, size === 256 ? 'build/icon-preview.png' : `extension/icons/icon${size}.png`)).toString('base64')}"><figcaption>${size}px</figcaption></figure>`).join(''));
+    }
+    await page.setViewportSize({width: 1400, height: 1000});
+    const row = (prefix, sizes) => sizes.map(size => `<figure style="margin:0;text-align:center"><img width="${size}" height="${size}" src="data:image/png;base64,${fs.readFileSync(path.join(root, `build/icons/${prefix}${size}.png`)).toString('base64')}"><figcaption>${size}px</figcaption></figure>`).join('');
+    await page.setContent(`<style>body{margin:32px;background:#eee;font:14px system-ui}.row{display:flex;gap:28px;align-items:center}.template{background:#123e42;color:white;padding:24px;margin-top:24px}img{image-rendering:auto}</style><div class="row">${row('icon', [16,22,32,48,128,256,512])}</div><div class="row template">${row('ferro-template', [16,22,32,48,128])}</div>`);
     await page.screenshot({path: path.join(output, 'icon-sizes.png')});
     assert.deepEqual(errors, []);
-    console.log('Shell branding: en/ja, 1280/800px, no clipping or page errors; rendered 256/128/48/32/16px icons.');
+    console.log('Shell branding: dev/prod, en/ja, 1280/800px, no clipping or page errors; rendered 16/22/32/48/128/256/512px icons and transparent tray variants.');
   } finally { await browser.close(); }
 })().catch(error => {console.error(error); process.exitCode = 1;});

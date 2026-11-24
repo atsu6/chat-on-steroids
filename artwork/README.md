@@ -23,13 +23,22 @@ node test/dev-brand.visual.cjs
 ```
 
 The first command only exports the SVG to the existing 1024px RGBA source.
-The last checks the actual renderer shell in English/Japanese at 1280/800px and writes
-shell screenshots and a 256/128/48/32/16px icon sheet to `outputs/dev-brand/`.
+The last checks both main-selected dev/prod display names in the actual renderer shell,
+in English/Japanese at 1280/800px, and writes shell screenshots and an icon sheet to
+`outputs/dev-brand/`. Review sizes are 16/22/32/48/128/256/512px, at native pixel size.
 It uses the locally installed Playwright and Google Chrome, with external requests blocked;
 `npm run icon` itself needs neither Chrome nor a new dependency.
 
 `make-icon.mjs` keeps its source-mask, crop, resampling, ICO/PNG/BMP outputs and invocation.
-Only its two-colour palette changes to teal/white. Build assets remain generated files.
+The palette is teal/white. `build/icons/icon{16,22,32,48,128,256,512}.png` supplies the
+complete review set. The same sizes also get `ferro-template*.png`: white on transparent,
+cropped around the ferro rather than the teal square, to improve small menu-bar legibility.
+Mask-transparent pixels contribute to the resampling area so tooth gaps antialias at 16px.
+The generator also writes `artwork/trayTemplate.png` (16px) and `trayTemplate@2x.png` (32px).
+These two are checked in so dev startup does not depend on ignored build files; macOS dev
+uses them as template images. Production keeps the existing connection-status tray icons.
+Build assets remain generated files. `test/dev-icon.test.ts` checks the complete outputs
+in an isolated temporary directory, including legacy ICO/PNG/BMP and extension assets.
 The original upstream design is recorded below as history.
 
 ## 2026-08-21 redesign

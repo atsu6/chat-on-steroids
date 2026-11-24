@@ -1598,3 +1598,94 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 次の開発アプリ再起動時に、ウィンドウ・About・トレイの表示名とDockアイコンを確認する。
   `productName` / `appId`を使うアプリメニューやインストール名などは、今回の表示名変更の対象外。
+
+## 2026-11-24 — dev/prodの表示名分離と再検証
+
+### 分かったこと
+
+- 前commit`ba4ecfbe`は表示名が固定されており、パッケージ版にも`(dev)`が出る実装だった。
+  `src/main/app-brand.ts`の1箇所で`app.isPackaged`を判定するよう変更した。
+  開発版は`Chat On Venice (dev)`、パッケージ版は`Chat On Venice`。
+  nativeのタイトル・About・トレイは同じmain所有のキーを使う。
+- mainの既存AppState IPCに表示キーを追加し、rendererは渡されたキーをt / uiで反映するだけにした。
+  index.htmlのtitleと両ヘッダは動的な空の表示先とし、dev名をHTMLへ埋め込まない。
+  旧stateと既存呼出しの互換性のためフィールドは追加のoptionalとし、rendererでdev判定や別の名前推測はしない。
+  ja / en両方にdev / prodキーとdev Aboutメニューのキーを登録した。
+- `package.json` / lockfile / `electron-builder.yml`は変更していない。
+  package名`chat-on-steroids`、productName`Chat On Steroids`、appId`com.chatonsteroids.app`を固定する回帰テストを追加した。
+  app.nameやuserDataを変える処理は追加していない。
+
+#### 前回の3件はVMへ新しい依存を渡し忘れた失敗
+
+`ba4ecfbe`で行ったテスト環境修正の主要差分は次のとおり。
+
+```diff
++import { mainText } from '../src/main/main-texts.js';
+-      layout: {}, icon: null, process: { platform },
++      layout: {}, icon: null, process: { platform }, mainText,
++    expect(options?.title).toBe('Chat On Venice (dev)');
+```
+
+- 既存のdarwin / win32 / linuxの3ケースとfullscreen / sandbox等のassertは維持されている。
+  テストの削除・skipやassertの緩和はなく、タイトルのassertを追加した。
+  今回はconstructorがmain所有のキーを参照するため、同じVMへ`appBrand`も渡した。
+- 前回commitの同じconstructor断片を使い、mainTextの有無だけを変える比較を実行した。
+  3環境とも依存なしでは`ReferenceError: mainText is not defined`、実際のmainText関数を渡すと
+  devタイトルと既存fullscreen条件が成功した。OS / Nodeのフレークではなく、テストハーネスの依存不足だった。
+  根拠は`outputs/dev-brand-review/test-environment-fix.patch`と`test-environment-proof.json`。
+
+#### アイコンの小サイズと出力を確認した
+
+- `npm run icon`に16 / 22 / 32 / 48 / 128 / 256 / 512pxの全出力を追加した。
+  `build/icons/icon*.png`と白単色透過の`ferro-template*.png`を生成する。
+  既存のICO 6サイズ、1024px / preview / runtime PNG、installer BMP、拡張4サイズの出力も維持した。
+- 16pxの角丸タイル版はferroの歯が詰まって見えたため、白いferroだけを大きく配置したトレイ専用版を追加した。
+  mask外の透明画素も縮小時の面積へ数え、歯と隙間をアンチエイリアスする。
+  16 / 32pxの`artwork/trayTemplate.png` / `trayTemplate@2x.png`をチェックインし、macOS devのtemplate imageに使う。
+  devの接続状態はツールチップと既存メニューへ表示し、prodの既存状態ドットは変えていない。
+- `test/dev-icon.test.ts`は一時フォルダーで実際のicon scriptを動かし、全出力・寸法・ICO収録数・透過白の画素を確認する。
+  SVG source、既存script経路、依存パッケージは維持した。手順は`artwork/README.md`。
+- headlessの実HTML / CSS / i18nでdev / prod、英語 / 日本語、1280 / 800pxを検証した。
+  タイトル・ヘッダ・折返し・検索ボタンの収まり・pageerror 0を確認し、全サイズを目視した。
+  根拠は`outputs/dev-brand-review/visual.log`と`outputs/dev-brand/icon-sizes.png`等。
+
+#### macOSで確認したこととアプリメニューの判断
+
+- 開始時点で開発アプリと8766 listenerは停止していた。既存の専用runtimeを使い、8766固定で起動・終了・再起動した。
+  通常CoSは起動していない。実Venice送信は行っていない。
+- 再起動後のnativeウィンドウ名と実rendererのヘッダは`Chat On Venice (dev)`。
+  Aboutには同じ表示名とアプリ版`2.1.54`を確認した（括弧内のElectron runtimeは`44.3.0`）。
+  根拠は`native-window-final.png` / `native-about-final.png`等、同reviewフォルダー内のローカル観測。
+- 実機のmacOSアプリメニューの先頭名は、本番名ではなく開発用runtimeの`Electron`だった。
+  カスタムの先頭ラベルを渡してもmacOSはruntime名を表示したため、先頭名は許容すると決めた。
+  app.setNameを使ってprofileの識別を変えず、devのAbout項目だけ`Chat On Venice (dev)について`に差し替えた。
+  残りの既存メニュー・role・shortcutはそのまま使い、prodのメニューは変更しない。
+- macOSの標準Aboutパネルのアイコンは開発runtimeのElectronマークが残ることを実測した。
+  iconPath指定による差し替えはこの環境の標準パネルへ反映されなかった。表示名と版は反映されている。
+- トレイの白いferroは実メニューバーで確認できた（`native-menubar-strip.png`）。
+  ツールチップとDock画像の確認中にはポインターが他の位置へ移動し、hoverを維持できなかった。
+  agent-desktopのdelivery表示だけでは成功とせず、OSの実ポインター座標と画面を確認した。
+  操作競合を避けるため、ユーザーへ短時間のマウス操作停止を依頼し、この2点の実機確認は保留した。
+
+#### 最終候補の検証結果
+
+- NodeはVoltaの`v22.23.5`。`npm test`を全体で1回実行し、終了コード0。
+  **525 passed / 0 failed / 20 skipped**（ファイル）、**12,838 passed / 0 failed / 218 skipped**（テスト）。
+  skip数は前回から変えていない。今回のコードとテストを固定して実行した。
+  根拠は`outputs/dev-brand-review/full-test.log` / `full-test.exit`。
+- `npm run typecheck`と`npm run build`も成功した（同フォルダーの`typecheck.log` / `build.log`）。
+  関連6ファイル440件、最終候補のbranding / icon / lifecycle 26件も成功した。
+  本番名 / dev名・ja / en・native About / window・メニューの保持・内部識別子・icon全出力に回帰テストを追加した。
+
+### 不明なこと
+
+- パッケージ版を実際に作成して起動する確認は行っていない。packaged=trueのmain分岐、native設定、
+  renderer表示、ja / enカタログは回帰テストとheadless画面で確認した。
+- トレイのツールチップが実際に表示された状態と、Dockのferro画像は未確認。
+  開発アプリは8766固定・既存の専用runtimeで起動したままにしている。
+
+### 次に確認したいこと
+
+- 将来パッケージ版を配布する際に、実bundleの表示名とアイコンを確認する。
+- マウス操作が競合しない時間に、起動中の開発アプリのツールチップとDock画像を確認する。
+  短い操作停止の可否はユーザーへ確認中。この2点の記録が揃ったら実機確認を完了扱いにする。

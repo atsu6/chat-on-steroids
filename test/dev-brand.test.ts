@@ -4,10 +4,17 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MAIN_TEXTS } from '../src/shared/main-texts.js';
 
 const name = 'Chat On Venice (dev)';
+const native = vi.hoisted(() => ({
+  app: { isPackaged: false, setAboutPanelOptions: vi.fn(), setName: vi.fn(), getVersion: () => '2.1.54', getAppPath: () => '/app' },
+  Menu: { getApplicationMenu: vi.fn(), buildFromTemplate: vi.fn((items: unknown[]) => ({ items })), setApplicationMenu: vi.fn() }
+}));
+vi.mock('electron', () => native);
 const read = (file: string) => readFileSync(file, 'utf8');
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
+  vi.clearAllMocks();
+  native.app.isPackaged = false;
   dom = new JSDOM(read('src/renderer/index.html'), { url: 'https://local.test/' });
   for (const key of ['window', 'document', 'Node', 'Element', 'HTMLElement'] as const) {
     vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
@@ -15,34 +22,67 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); dom.window.close(); });
 
-it.each(['en', 'ja', 'de'] as const)('keeps the window and header name visible through %s localization', async language => {
+it.each(['en', 'ja', 'de'] as const)('binds both main-selected names through %s localization', async language => {
   const i18n = await import('../src/renderer/i18n.js');
+  const { applyAppBrand } = await import('../src/renderer/app-brand.js');
   i18n.initLanguage();
-  i18n.setLanguage(language);
-  expect(dom.window.document.title).toBe(name);
-  expect(dom.window.document.querySelector('.sidebar-brand strong')?.textContent).toBe(name);
-  expect(dom.window.document.querySelector('.chat-head .title')?.textContent).toContain(name);
-  const texts = await import('../src/renderer/main-texts.js');
-  expect(texts.mainTexts()[name]).toBe(name);
-});
-
-it('registers the display name in the native text contract and both required catalogs', () => {
-  expect(MAIN_TEXTS).toContain(name);
-  for (const language of ['en', 'ja']) {
-    expect(JSON.parse(read(`src/renderer/locales/${language}.json`))[name]).toBe(name);
+  expect(dom.window.document.title).toBe('');
+  for (const displayName of ['Chat On Venice (dev)', 'Chat On Venice'] as const) {
+    applyAppBrand(displayName);
+    i18n.setLanguage(language);
+    expect(dom.window.document.title).toBe(displayName);
+    expect(dom.window.document.querySelector('.sidebar-brand strong')?.textContent).toBe(displayName);
+    expect(dom.window.document.querySelector('.chat-head .title')?.textContent).toContain(displayName);
+    const texts = await import('../src/renderer/main-texts.js');
+    expect(texts.mainTexts()[displayName]).toBe(displayName);
   }
 });
 
-it('uses the native i18n name for the initial window, tray, About and language refresh', () => {
+it('registers dev/prod display names in the native contract and both required catalogs', () => {
+  for (const key of ['Chat On Venice (dev)', 'Chat On Venice'] as const) {
+    expect(MAIN_TEXTS).toContain(key);
+    for (const language of ['en', 'ja']) {
+      expect(JSON.parse(read(`src/renderer/locales/${language}.json`))[key]).toBe(key);
+    }
+  }
+});
+
+it.each([false, true])('main selects the packaged=%s name for native About, window and IPC', async packaged => {
+  native.app.isPackaged = packaged;
+  const otherMenu = { label: 'File' }, quit = { role: 'quit' };
+  native.Menu.getApplicationMenu.mockReturnValue({ items: [{ label: 'Electron', submenu: { items: [{ role: 'about' }, quit] } }, otherMenu] });
+  const { appBrand, refreshNativeBrand } = await import('../src/main/app-brand.js');
+  const displayName = packaged ? 'Chat On Venice' : name;
+  expect(appBrand).toEqual({ development: !packaged, displayName });
+  const window = { isDestroyed: () => false, setTitle: vi.fn() };
+  refreshNativeBrand(window as never);
+  expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.54',
+    ...(!packaged ? {iconPath: '/app/artwork/app-icon-source.png'} : {}) });
+  expect(window.setTitle).toHaveBeenCalledWith(displayName);
+  expect(native.app.setName).not.toHaveBeenCalled();
+  if (!packaged && process.platform === 'darwin') {
+    expect(native.Menu.setApplicationMenu).toHaveBeenCalledWith({ items: [
+      { label: 'Electron', submenu: { items: [{ role: 'about', label: 'About Chat On Venice (dev)' }, quit] } }, otherMenu
+    ] });
+  } else expect(native.Menu.setApplicationMenu).not.toHaveBeenCalled();
   const source = read('src/main/index.ts');
-  expect(source).toContain(`title: mainText('${name}')`);
-  expect(source).toContain("tray.setToolTip(`${mainText('Chat On Venice (dev)')} — ${label}`)");
-  expect(source).toContain(`const applicationName = mainText('${name}')`);
-  expect(source).toContain('app.setAboutPanelOptions({ applicationName })');
-  expect(source).toContain('window.setTitle(applicationName)');
-  expect(source).toContain('onMainTextsChange(refreshNativeBrand)');
-  expect(source).toContain("app.dock?.setIcon(path.join(app.getAppPath(), 'artwork', 'app-icon-source.png'))");
-  expect(source).not.toMatch(/app\.setName\s*\(/);
+  expect(source).toContain('title: mainText(appBrand.displayName)');
+  expect(source).toContain('tray.setToolTip(`${mainText(appBrand.displayName)} — ${label}`)');
+  expect(read('src/main/ipc.ts')).toContain('displayName: appBrand.displayName');
+  expect(read('src/renderer/main.ts')).toContain('if (next.displayName) applyAppBrand(next.displayName)');
+  expect(source).toContain('onMainTextsChange(() => refreshNativeBrand(window))');
+});
+
+it('keeps profile/package identities independent of display branding', () => {
+  const pkg = JSON.parse(read('package.json'));
+  expect(pkg.name).toBe('chat-on-steroids');
+  expect(pkg.productName).toBeUndefined();
+  const builder = read('electron-builder.yml');
+  expect(builder).toMatch(/^appId: com\.chatonsteroids\.app$/m);
+  expect(builder).toMatch(/^productName: Chat On Steroids$/m);
+  const source = read('src/main/app-brand.ts').replace(/\/\/[^\n]*/g, '');
+  expect(source).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(/);
+  expect(read('src/renderer/index.html')).not.toContain('(dev)');
 });
 
 it('keeps the SVG and renderer ferro silhouette and palette in sync', () => {

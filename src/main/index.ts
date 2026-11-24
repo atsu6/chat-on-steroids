@@ -1,4 +1,5 @@
 import { veniceToolGateway } from './venice-tool-gateway.js';
+import { appBrand, refreshNativeBrand } from './app-brand.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
 import { steerFromTelegram } from './telegram-steer.js';
@@ -199,7 +200,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(shownTheme(getConfig().ui.theme), getConfig().ui.appearance),
-    title: mainText('Chat On Venice (dev)'),
+    title: mainText(appBrand.displayName),
     webPreferences: {
       zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
@@ -396,6 +397,11 @@ const windowActivation = createWindowActivationGate(showWindow);
 
 /** Build the native tray image from encoded PNGs, never platform-dependent bitmap bytes. */
 function trayIcon(running: boolean): Electron.NativeImage {
+  if (appBrand.development && process.platform === 'darwin') {
+    const image = nativeImage.createFromPath(path.join(app.getAppPath(), 'artwork', 'trayTemplate.png'));
+    image.setTemplateImage(true);
+    return image;
+  }
   const spec = trayImageSpec(process.platform, running);
   const [base, ...highDpi] = spec.representations;
   const image = nativeImage.createFromBuffer(base.png, { scaleFactor: base.scaleFactor });
@@ -409,12 +415,6 @@ function trayIcon(running: boolean): Electron.NativeImage {
   return image;
 }
 
-function refreshNativeBrand(): void {
-  const applicationName = mainText('Chat On Venice (dev)');
-  app.setAboutPanelOptions({ applicationName });
-  if (window && !window.isDestroyed()) window.setTitle(applicationName);
-}
-
 function refreshTray(): void {
   if (!tray) return;
   const state = getStatus().state;
@@ -425,7 +425,7 @@ function refreshTray(): void {
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`${mainText('Chat On Venice (dev)')} — ${label}`);
+  tray.setToolTip(`${mainText(appBrand.displayName)} — ${label}`);
   const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -502,10 +502,10 @@ void app.whenReady().then(async () => {
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
-  refreshNativeBrand();
-  onMainTextsChange(refreshNativeBrand);
+  refreshNativeBrand(window);
+  onMainTextsChange(() => refreshNativeBrand(window));
   // Display-only branding: never setName(), appId or userData for this development fork.
-  if (!app.isPackaged && process.platform === 'darwin') {
+  if (appBrand.development && process.platform === 'darwin') {
     app.dock?.setIcon(path.join(app.getAppPath(), 'artwork', 'app-icon-source.png'));
   }
   await loadConnectorIdentity();

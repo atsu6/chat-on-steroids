@@ -22,7 +22,7 @@ describe('native window activation', () => {
     let options: Record<string, unknown> | undefined;
     vm.runInNewContext(constructor, {
       BrowserWindow: function (value: Record<string, unknown>) { options = value; },
-      layout: {}, icon: null, process: { platform }, mainText,
+      layout: {}, icon: null, process: { platform }, mainText, appBrand: { displayName: 'Chat On Venice (dev)' },
       titleBarOverlayForTheme: () => ({}), windowBackgroundForTheme: () => '#181818', getConfig: () => ({ ui: { theme: 'dark' } }), shownTheme: (theme: string) => theme,
       UI_BASE_ZOOM: 1, path: { join: () => 'preload.js' }, __dirname: '/app'
     });

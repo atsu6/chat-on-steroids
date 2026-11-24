@@ -1,4 +1,5 @@
 import { veniceToolGateway, veniceSenderSchema } from './venice-tool-gateway.js';
+import { appBrand } from './app-brand.js';
 import { createSession as createVeniceDebugSession } from './session/store.js';
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
@@ -696,6 +697,7 @@ function resolvedBinary(config: Config): string | null {
 async function buildState(): Promise<AppState> {
   const config = getConfig();
   return {
+    displayName: appBrand.displayName,
     config,
     status: getStatus(),
     connectorSchemas: Object.fromEntries(
