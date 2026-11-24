@@ -1370,6 +1370,10 @@ export async function validatedWorkspace() {
 /** The workspace, plus the virtual path of a learned one just dropped because its folder is gone. */
 async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: string } | null; missing: string | null }> {
   const call = currentCall();
+  if (call?.origin?.type === 'venice') {
+    const root = call.origin.roots[0];
+    return { workspace: root ? { virtual: `/${root.name}`, real: root.path } : null, missing: null };
+  }
   const sessionId = call?.caller.sessionId;
   // Session project metadata is inherited by workers for grouping; the broker's exact
   // worktree allocation must take precedence, including after a restart or revival.
@@ -1420,7 +1424,9 @@ export async function resolveIn(
   const host = currentCall()?.origin;
   if (host?.type === 'venice') {
     if (!host.current()) throw new SandboxError('RUN_REVOKED');
-    if (!effectiveCapabilities(getConfig()).read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
+    const live = effectiveCapabilities(getConfig());
+    if (host.tool === 'apply_patch' && (!host.write || !(live.create || live.edit || live.move || live.deleteFile))) throw new SandboxError('TOOL_DISABLED: changing files is not permitted.');
+    if ((host.tool !== 'apply_patch' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
     // No implicit managed/user-Skill roots or learned ChatGPT cwd on this surface.
     // The ordinary resolver still owns canonical paths, traversal and symlinks.
     return resolvePath(host.roots, requested, { ...options, base: options.base ?? null });
@@ -1605,11 +1611,12 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     registered: () => [...names],
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
     async invokeHostAdmitted(name, args, origin) {
-      // This first host surface deliberately admits read only. It never lends its
-      // identity to Desktop, lifecycle tools, code mode or a provider's inbox.
-      if (surface !== 'core' || name !== 'read') return fail('UNKNOWN_TOOL: only core/read is admitted.');
+      // Host admission never lends its identity to shell, Desktop or lifecycle tools.
+      if (surface !== 'core' || !['read', 'apply_patch'].includes(name)) return fail('UNKNOWN_TOOL: only core/read and core/apply_patch are admitted.');
+      if (name === 'apply_patch' && origin.write !== true) return fail('TOOL_NOT_GRANTED');
+      const reading = name === 'read' || origin.preview === true;
       const context: CallContext = {
-        origin, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
+        origin: { ...origin, tool: name as 'read' | 'apply_patch' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
         allowUnattributed: false, evidence: emptyEvidence(), outcome: null,
         publication: { completedAt: null, failed: false },
         caller: { transportKey: `venice:${origin.runId}`, requestId: null,
@@ -1619,18 +1626,19 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
         const session = await getSession(origin.sessionId);
         if (!session || session.conversationId || session.endedAt) return fail('VENICE_SESSION_UNAVAILABLE');
         if (!origin.current()) return fail('RUN_REVOKED');
-        if (!caps.read || !effectiveCapabilities(getConfig()).read) return fail('TOOL_DISABLED: read requires reading permission.');
+        if (reading && (!caps.read || !effectiveCapabilities(getConfig()).read)) return fail('TOOL_DISABLED: read requires reading permission.');
         const entry = handlers.get(name);
         const result = await guard(name, async () => {
           if (!origin.current()) return fail('RUN_REVOKED');
-          return entry ? entry.run(args) : fail('UNKNOWN_TOOL: read is not available.');
+          return entry ? entry.run(args) : fail(`UNKNOWN_TOOL: ${name} is not available.`);
         });
         // Revocation during a read withholds its content, without executing it twice.
         let delivered = !origin.current() ? fail('RUN_REVOKED')
-          : !effectiveCapabilities(getConfig()).read ? fail('TOOL_DISABLED: read requires reading permission.')
+          : reading && !effectiveCapabilities(getConfig()).read ? fail('TOOL_DISABLED: read requires reading permission.')
           : await shieldOutput(context, name, result);
         if (!origin.current()) delivered = fail('RUN_REVOKED');
-        else if (!effectiveCapabilities(getConfig()).read) delivered = fail('TOOL_DISABLED: read requires reading permission.');
+        else if (reading && !effectiveCapabilities(getConfig()).read) delivered = fail('TOOL_DISABLED: read requires reading permission.');
+        if (origin.preview) return delivered;
         await recordToolCall({ hostAdmitted: { runId: origin.runId, sessionId: origin.sessionId },
           tool: name, args, content: delivered.content, outcome: context.outcome ?? (delivered.isError ? 'tool_rejected' : 'ok'),
           durationMs: Date.now() - context.startedAt, startedAt: context.startedAt, evidence: context.evidence });

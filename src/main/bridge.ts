@@ -3388,6 +3388,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const parsed = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
     if (!parsed.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
     try {
+      if (body.preview === true) {
+        try { return json(res, 200, await veniceToolGateway.previewPatch(body.request, parsed.data), origin); }
+        catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : 'PATCH_PREVIEW_FAILED' }, origin); }
+      }
       return json(res, 200, await veniceToolGateway.call(body.request, parsed.data), origin);
     } catch {
       return json(res, 400, { error: 'invalid_venice_request' }, origin);

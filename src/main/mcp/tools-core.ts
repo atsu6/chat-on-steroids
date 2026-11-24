@@ -5,7 +5,8 @@ import { goalWorkerChat, imageExportCapable } from '../bridge.js';
 import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveCapabilities } from '../config.js';
+import { previewVenicePatch } from '../venice-patch-preview.js';
 import { createHash } from 'node:crypto';
 import { checkAutomaticSend } from '../send-check.js';
 import { liveConnectorName } from './surfaces.js';
@@ -1975,6 +1976,14 @@ async function runParsedPatch(
     };
   }
 
+  if (currentCall()?.origin?.type === 'venice' && currentCall()?.origin?.preview) {
+    try {
+      const diff = await previewVenicePatch(effectiveArgs.patch, effectiveBase.real, resolution.resolve,
+        resolution.fs, real => resolution.virtualPaths.get(real) ?? real);
+      return { result: ok(diff), content: diff, exitCode: 0 };
+    } catch (error) { return { result: fail(friendlyError(error)), content: null, exitCode: null }; }
+  }
+
   let rollbackSnapshots: Map<string, PatchRollbackSnapshot> | null = null;
   if (caps !== undefined) {
     try {
@@ -1985,6 +1994,15 @@ async function runParsedPatch(
   }
 
   await checkpointBeforePatch([...resolution.virtualPaths.keys()]);
+  const host = currentCall()?.origin;
+  if (host?.type === 'venice') {
+    if (!host.current() || host.write !== true) return { result: fail('RUN_REVOKED'), content: null, exitCode: null };
+    const live = effectiveCapabilities(getConfig());
+    const denial = patchCapabilityDenial(effectiveArgs.hunks, live) ??
+      await patchEffectCapabilityDenial(effectiveArgs.hunks, live, resolution.resolve, resolution.fs);
+    if (denial) return { result: fail(denial), content: null, exitCode: null };
+    if (!host.current()) return { result: fail('RUN_REVOKED'), content: null, exitCode: null };
+  }
   const execution = await executeApplyPatch({
     patch: effectiveArgs.patch,
     cwd: effectiveBase.real,
