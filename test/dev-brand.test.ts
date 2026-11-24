@@ -145,6 +145,37 @@ it('packages the canonical tray assets and prepares them for the existing dev en
   expect(read('scripts/package.mjs')).toContain("run(node, ['scripts/make-icon.mjs'])");
 });
 
+it.each([false, true])('reports actual native image and tray state (empty/destroyed=%s)', empty => {
+  const source = read('src/main/index.ts');
+  const startup = source.slice(source.indexOf('  const initialTrayImage = trayIcon(false);'), source.indexOf('  onStatusChange(refreshTray);'));
+  const logs: string[] = [];
+  const bounds = { x: 100, y: 0, width: 24, height: 22 };
+  const file = '/resources/icons/trayTemplate.png';
+  const createFromPath = vi.fn(() => ({ isEmpty: () => !empty }));
+  class NativeTray {
+    on() {}
+    isDestroyed() { return empty; }
+    getBounds() { return bounds; }
+  }
+  vm.runInNewContext(transformSync(`let tray;\n${startup}`, { loader: 'ts' }).code, {
+    appBrand: { development: true, displayName: name },
+    process: { platform: 'darwin', resourcesPath: '/resources' },
+    app: { isPackaged: true, isReady: () => true, getAppPath: () => '/resources/app.asar' },
+    appBrandAssetPath: () => file, existsSync: (path: string) => path === file,
+    trayIcon: () => ({ isEmpty: () => empty, isTemplateImage: () => true, getSize: () => ({ width: 16, height: 16 }) }),
+    Tray: NativeTray, nativeImage: { createFromPath }, trayGuidArgsForPlatform: () => [],
+    windowActivation: { request: () => {} }, refreshTray: () => {}, mainText: (text: string) => text,
+    logInfo: (line: string) => logs.push(line)
+  });
+  const prefix = 'branding: tray diagnostics=';
+  expect(JSON.parse(logs.find(line => line.startsWith(prefix))!.slice(prefix.length))).toEqual({
+    imagePath: file, exists: true, fromPathEmpty: !empty, imageEmpty: empty, template: true,
+    imageSize: { width: 16, height: 16 }, trayCreated: true, trayDestroyed: empty,
+    ready: true, packaged: true, resourcesPath: '/resources', appPath: '/resources/app.asar', bounds
+  });
+  expect(createFromPath).toHaveBeenCalledWith(file);
+});
+
 it('keeps profile/package identities independent of display branding', () => {
   const pkg = JSON.parse(read('package.json'));
   expect(pkg.name).toBe('chat-on-steroids');

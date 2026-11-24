@@ -10,7 +10,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
@@ -881,6 +881,17 @@ void app.whenReady().then(async () => {
   }
   tray.on('click', windowActivation.request);
   refreshTray();
+  if (appBrand.development && process.platform === 'darwin') {
+    const imagePath = appBrandAssetPath('icons/trayTemplate.png');
+    logInfo(`branding: tray diagnostics=${JSON.stringify({
+      imagePath, exists: existsSync(imagePath),
+      fromPathEmpty: nativeImage.createFromPath(imagePath).isEmpty(),
+      imageEmpty: initialTrayImage.isEmpty(), template: initialTrayImage.isTemplateImage(),
+      imageSize: initialTrayImage.getSize(), trayCreated: true, trayDestroyed: tray.isDestroyed(),
+      ready: app.isReady(), packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath, appPath: app.getAppPath(), bounds: tray.getBounds()
+    })}`);
+  }
   // Electron 44 exposes setToolTip only. Record the actual capability and setter value;
   // do not mistake this diagnostic for a native getter result.
   const getToolTip = (tray as Tray & { getToolTip?: () => string }).getToolTip;

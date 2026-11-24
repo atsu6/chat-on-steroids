@@ -1943,7 +1943,7 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 次の機能作業は既存のprogressキューに従う。今回の変更はトレイ・回帰テスト・確認記録に限定した。
 
-## 2026-11-24 — パッケージのトレイ資産を統合（実機表示確認は保留）
+## 2026-11-24 — パッケージのトレイ資産を統合（実機表示は後続の追試で完了）
 
 ### 分かったこと
 
@@ -1968,7 +1968,7 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 - final artifactの実収録を確認した。`trayTemplate.png`は16×16、`trayTemplate@2x.png`は32×32、
   runtime-iconは256×256。根拠は`outputs/packaged-ferro-validation/effective-assets.json`。
 
-#### 3. パッケージ実行の確認と未達
+#### 3. パッケージ実行の確認と未達（当時の記録）
 
 - `scripts/package.mjs --platform darwin --arch arm64 --dir`で実物を生成し、
   `release/mac-arm64/Chat On Steroids.app`を隔離profileで起動した。
@@ -1982,7 +1982,7 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
   tooltipのsetterへ渡した文字列は正確に`Chat On Venice (dev)`だった。
   NativeImageの実デコードでも非透明画素73個を確認し、空画像ではなかった。
   ウィンドウのAXタイトルとrenderer URLも、この実パッケージの`Chat On Venice (dev)`だった。
-- **ferroとtooltipの実メニューバーでの目視は未達。項目3を保留とする。**
+- **この時点ではferroとtooltipの目視が未達で、項目3を保留とした。後続の「トレイの実行時診断と実表示」で保留を解除した。**
   ライト・ダーク両方で確認したが、アイコンを可視表示できなかった。
   メニューバー項目の一時非表示、表示許可の再確認、通常版の一時終了、
   ユーザー承認済みのSystemUIServer / ControlCenter再起動後にも確認した。
@@ -2013,11 +2013,94 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 ### 不明なこと・残作業
 
-- 項目3の実機表示を妨げる原因。パッケージの収録・読込と空でないことまでは確認済みだが、
-  ferroとtooltipの両テーマでの目視確認は完了していない。
+- この時点の残作業は項目3の目視確認だった。後続の追試でライト・ダークのferroとtooltipの実表示を確認した。
 
 ### 次に確認したいこと
 
-- 担当はCodex。パッケージ版のNSStatusItemを実メニューバーへ表示できる状態にし、
-  同じartifactのferroとtooltipをライト・ダークの両方で確認する。
-  Mac再起動など、承認済みの管理プロセス再起動を超える介入は別途ユーザー承認を得てから行う。
+- 当時はCodexが目視確認を引き継いだ。追試の結果と再利用できる観測手順は次節に記録する。
+
+## 2026-11-24 — トレイの実行時診断と実表示
+
+### 分かったこと
+
+#### 1. 成果物の配置
+
+再ビルドした`.app`に対する`find`の結果は次の2ファイル。`ferro-template*.png`は確認用派生なので収録せず、
+`app.asar`のエントリ一覧にも`ferro` / `trayTemplate`を含むファイルはなかった。
+
+```text
+/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate@2x.png
+/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate.png
+```
+
+根拠: `outputs/tray-runtime-diagnosis/find-packaged-assets.log`。実読込用ファイルは`extraResources`側だけにある。
+
+#### 2. 実行時の画像・Tray・readyを記録
+
+`src/main/index.ts`の既存Tray初期化にdev/macOS限定の構造化ログを追加した。
+実パッケージの実行ファイルをターミナルから`COS_DEV_BRAND=1`、8767、隔離profileで起動した結果は次のとおり。
+
+| フィールド | 実測値 |
+| --- | --- |
+| imagePath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate.png` |
+| exists | `true` |
+| fromPathEmpty（`createFromPath(...).isEmpty()`） | `false` |
+| imageEmpty（実際に渡したPNG buffer由来の画像） | `false` |
+| template / imageSize | `true` / 16×16 |
+| trayCreated / trayDestroyed | `true` / `false` |
+| ready / packaged | `true` / `true` |
+| resourcesPath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources` |
+| appPath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/app.asar` |
+
+根拠: `outputs/tray-runtime-diagnosis/runtime/app.log`、ターミナルの起動記録は`packaged-terminal*.log`。
+`new Tray(...)`は既存の`app.whenReady().then(...)`内で実行される。
+`isPackaged`でTray生成を省く分岐はない。`appBrand.development && darwin`は画像選択と診断ログだけの分岐。
+secondary instance / 終了中のbootstrapを止める既存ガードと、終了時の`tray.destroy()`は維持した。
+
+初期化直後の`getBounds()`はlayout前で高さ0だったが、描画後の当該PIDのAX status itemは34×24だった。
+最終パッケージ実行のPIDと実座標は`outputs/tray-runtime-diagnosis/packaged-visible-state.json`に保存した。
+
+#### 3. 切り分け結果と観測手順の修正
+
+- 空画像、未生成、ready前の生成、破棄済みのいずれでもなかった。
+  パッケージの解決先は既に`process.resourcesPath/icons/...`で正しく、asarとの混在もなかった。
+  パスや画像、GUID、Tray生成条件は変更していない。
+- 今回は通常版とdevを一時終了して実パッケージのPIDを特定し、そのウィンドウを外部ディスプレイへ移して確認した。
+  外部画面の座標は`x=1512, y=-98`から始まる。主画面だけの観測や非アクティブなメニューバーではなく、
+  対象PIDのAX status itemの位置を取得し、対象画面のアプリをアクティブにして、そのアイコンをクリック／hoverした。
+- 同じ成果物でferroの描画とメニュー操作、ツールチップの実表示まで確認できた。
+  前回の「表示なし」はこの有効な実機観測で訂正し、**項目3の保留を解除する**。
+  OS再起動やOS不具合を前提にした製品側の回避策は不要だった。
+
+#### 4. パッケージ版の実表示
+
+- `npm run build`と`scripts/package.mjs --platform darwin --arch arm64 --dir`を再実行し、内部build・ad-hoc封印・native smokeが成功した。
+  根拠: `outputs/tray-runtime-diagnosis/build.log` / `build.exit`、`package.log` / `package.exit`。
+- ライトの明るいメニューバーでは黒いferro、ダークでは白いferroを確認した。
+  16pxで6本の歯と隙間を識別でき、同じTemplate PNGがテーマに追従した。
+  ライトでのhover表示は正確に`Chat On Venice (dev)`だった。
+- 根拠: `packaged-light-tooltip.png`（黒いferroとtooltip）、`packaged-dark-final.png`（白いferro）、
+  `packaged-click-final.png`（当該トレイのメニュー）。いずれも`outputs/tray-runtime-diagnosis/`内。
+  明暗を明確に比較する間だけメニューバー背景と「透明度を下げる」を有効にし、検証後は元のoffへ戻した。外観も元のダークへ戻した。
+
+#### 5. devを犠牲にしていないことと回帰確認
+
+- devは従来どおり`CLF_BRIDGE_PORTS=8766 npm run dev -- -- --user-data-dir=/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime`で起動した。
+  devの解決先は`/Users/atsu/chat-on-venice/build/icons/trayTemplate.png`。
+  `exists=true`、`fromPathEmpty=false`、`imageEmpty=false`、`trayDestroyed=false`、`ready=true`、`packaged=false`だった。
+  packageだけは`resourcesPath`、checkoutだけは`app.getAppPath()/build`を使う既存の単一resolverを維持している。
+- devの実メニューバーにも同じferroと`Chat On Venice (dev)`のtooltipを確認した。
+  根拠: `outputs/tray-runtime-diagnosis/dev-dark-tooltip.png`、devの既存runtime内`app.log`。
+- 診断ログが実際の`isEmpty()` / `isDestroyed()`を記録する2ケースを追加し、対象5ファイルは
+  **73 passed / 0 failed / 0 skipped**。型チェックも終了コード0。既存テストの削除、skip、assertの緩和はない。
+  根拠: `outputs/tray-runtime-diagnosis/targeted.log` / `targeted.exit`、`typecheck.log` / `typecheck.exit`。
+
+### 不明なこと
+
+- 前回の各未表示場面の具体的な要因は、当該PID・画面・アクティブ状態を対応付けた記録がなく遡及できない。
+  今回はこれらを揃え、画像パスを変えずに描画とtooltipを確認した。
+
+### 次に確認したいこと
+
+- 同様の確認では、成果物の配置と実行時ログに加え、対象PID・ディスプレイのグローバル座標・アクティブ状態を揃える。
+  setter値だけでtooltipの目視確認を代用しない。
