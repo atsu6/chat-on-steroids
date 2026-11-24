@@ -552,3 +552,20 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 検証はユーザー指定どおり実Venice送信なし。`test/venice-apply-patch*.test.ts` は実kernel・HTTP route・一時フォルダーと
 合成DOMを検証し、`node test/venice-apply-patch.visual.cjs` は通信を全てローカル応答/abortにしたheadless Chromeで
 既存のMAIN/ISOLATED bridgeと承認・差分の描画を確認する。実測値・完了commitはfindingsとprogressに記録する。
+
+
+## 13. exec_command（2026-11-24 着手）
+
+- ユーザー承認の第4段階。read / writeとは独立した既定OFFのshell同意を追加する。
+- 既存のkernel、exec_commandハンドラ、コマンド許可ルール、UnifiedExecProcessManagerを使う。
+  stdout / stderrの分離とspawn直後のrun所有登録が必要なため、`src/main/codex/unified-exec.ts`には
+  任意指定の出力・生存期間コールバックだけ追加する。未指定の既存呼び出しの動作は変えない。
+  run別の上限・出力保持・失効時killはVenice専用の所有者が担う。
+- cwdはgrant先頭rootが既定。明示cwdも同じcanonical / symlink検証を通し、root外を拒否する。
+  shell自体はフォルダー内に隔離されない。ファイルread/writeの承認とは別の権限として説明する。
+- Venice shellに限り、revoke / Stop / app終了でそのrunの生存プロセスをkillする。
+  既存のread / writeの失効契約や、通常のChatGPT向けStopの動作は変更しない。
+- 出力は1プロセス64KiBまで先頭を保持し、stdout / stderrを分けて省略を表示する。
+  実行中の出力取得は同じgatewayで元のsender / run / callIdを照合する観測のみとする。
+- waitは`yield_time_ms`、既定10,000ms・最大30,000ms。時間切れでkillせずprocessIdを返す。
+  `write_stdin`自体の公開は次の第5段階。
