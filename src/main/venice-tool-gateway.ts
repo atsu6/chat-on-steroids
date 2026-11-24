@@ -7,9 +7,9 @@ import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { resolvePath, validateNewRoot, uniqueRootName } from './sandbox.js';
 import { getSession } from './session/store.js';
-import { createRegistrar } from './mcp/kernel.js';
+import { createRegistrar, shieldSessionToolOutput } from './mcp/kernel.js';
 import { registerCoreTools } from './mcp/tools-core.js';
-import { VeniceExecRuns, type VeniceExecLease } from './venice-exec.js';
+import { VeniceExecRuns, boundVeniceExecOutput, type VeniceExecLease } from './venice-exec.js';
 
 export const veniceSenderSchema = z.object({
   browserId: z.string().regex(/^[a-z0-9]{16,64}$/),
@@ -253,7 +253,11 @@ export class VeniceToolGateway {
     if (!('grant' in admission)) throw new Error(admission.error);
     const record = this.records.get(request.callId);
     if (request.tool !== 'exec_command' || !record || !isDeepStrictEqual(record.request, request) || !isDeepStrictEqual(record.sender, sender)) throw new Error('CALL_NOT_AUTHORIZED');
-    return this.execRuns.get(request.callId)?.snapshot() ?? null;
+    const snapshot = this.execRuns.get(request.callId)?.snapshot();
+    if (!snapshot) return null;
+    const shielded = await shieldSessionToolOutput(admission.grant.value.sessionId, 'exec_command output', { content: [], structuredContent: { ...snapshot } });
+    if (!admission.current()) throw new Error('RUN_REVOKED');
+    return boundVeniceExecOutput(shielded.structuredContent as unknown as import('../shared/venice-integration.js').VeniceExecOutput);
   }
   async waitForRevocation(): Promise<void> { await this.execRuns.drain(); }
 

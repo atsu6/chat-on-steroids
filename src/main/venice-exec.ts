@@ -4,6 +4,23 @@ import type { VeniceExecOutput } from '../shared/venice-integration.js';
 
 export const VENICE_EXEC_OUTPUT_BYTES = 64 * 1024;
 
+/** Masking can expand short secret settings; the published view has the same byte ceiling. */
+export function boundVeniceExecOutput(output: VeniceExecOutput): VeniceExecOutput {
+  const stdout = Buffer.from(output.stdout), stderr = Buffer.from(output.stderr);
+  const excess = Math.max(0, stdout.length + stderr.length - VENICE_EXEC_OUTPUT_BYTES);
+  if (!excess) return output;
+  const head = stdout.subarray(0, VENICE_EXEC_OUTPUT_BYTES);
+  const rest = stderr.subarray(0, VENICE_EXEC_OUTPUT_BYTES - head.length);
+  return { ...output, stdout: new StringDecoder('utf8').write(head), stderr: new StringDecoder('utf8').write(rest),
+    truncated: true, omittedBytes: output.omittedBytes + excess };
+}
+
+export function veniceExecResult(output: VeniceExecOutput) {
+  const view = boundVeniceExecOutput(output);
+  return { content: [{ type: 'text' as const, text: `Process ID: ${view.processId}\nExit code: ${view.running ? 'running' : view.exitCode}\nstdout:\n${view.stdout}\nstderr:\n${view.stderr}` + (view.truncated ? '\n[output truncated]' : '') }],
+    structuredContent: { ...view, output: { stdout: view.stdout, stderr: view.stderr } } };
+}
+
 /** Trusted, run-owned custody. The wire can neither create a lease nor choose its owner. */
 export class VeniceExecLease {
   private stdout: Buffer[] = [];
