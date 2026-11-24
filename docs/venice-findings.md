@@ -1553,3 +1553,621 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - Chromeで開発用拡張を再読み込みし、既に開いているChatGPTタブも再読み込みして旧注入を取り除く。
   通常CoSのChatGPT動作と、開発用拡張のVenice動作を確認する。
+
+## 2026-11-24 — 開発版の表示名とferroアイコン
+
+### 分かったこと
+
+- Venice専用拡張の`81003931`を`codex/venice-exec`へno-ffでマージし、`5543094a`をpushした。
+  その後`brand/dev-name`で表示上のブランドを変更した。
+- メインウィンドウの初期タイトル、rendererのtitle、サイドバーとチャットヘッダの名前、
+  トレイのツールチップ、ネイティブAboutのapplicationNameを`Chat On Venice (dev)`に統一した。
+  rendererの既存t / ui経路とMAIN_TEXTSを使い、ja / enに同じ表示名を登録した。
+  他言語は既存の英語フォールバックを使う。言語変更時はnative側のAboutとタイトルも更新する。
+- `package.json` / lockfile / `electron-builder.yml`は変更していない。
+  `productName`、`appId`、package名は内部の識別子として据え置き、app.setNameやuserDataの変更も行っていない。
+  パッケージ版の既定保存先を動かさないためproductNameを維持する。devの保存先は別途
+  `--user-data-dir`の明示パスで固定しており、productName据え置きとは独立した指定である。
+  表示名で通常CoSとの見分けを付け、appIdは既存のnative識別を維持する。
+- 新規の`artwork/app-icon-source.svg`は暗いティール`#123e42`の角丸四角と白いferroのオリジナルシルエット。
+  六つの前歯・反対側の歯・上部の曲線を持つ形にした。rendererのi-markにも同じパスを使う。
+  SVGからRGBA PNGを書き出し、既存の`npm run icon`でICO / PNG / BMPと拡張の4サイズを生成した。
+  既存のPNG入力・mask / crop / resampleの流れと出力先は維持し、二色パレットだけを更新した。
+  再生成手順は`artwork/README.md`に記載した。
+- macOS開発起動時のDockには、チェックイン済みのsource PNGを設定する。
+  無視対象のbuild画像の有無に起動を依存させない。packaged版のnativeアイコン選択や、トレイの状態ドットは変更していない。
+- NodeはVoltaの`v22.23.5`。変更箇所のテスト5ファイル135件が成功し、最終変更後の追加6件も成功した。
+  型チェックとbuild、変更したJSスクリプトの構文検査も成功した。
+- 全体`npm test`は指定どおり1回実行し、**523 passed / 1 failed / 20 skipped**（ファイル）、
+  **12,832 passed / 3 failed / 218 skipped**（テスト）。失敗は全て`window-lifecycle.test.ts`の
+  darwin / win32 / linuxのconstructor切出し実行で、VMへ`mainText`が渡されていないReferenceErrorだった。
+  同テストへ実際の`mainText`依存を渡し、既存assertは維持して新タイトルのassertも追加した。
+  テストの削除・skip・assertの緩和は行っていない。全体実行のログは`outputs/dev-brand/full-test.log`。
+  補完後は失敗ファイルを含む関連6ファイルを実行し、**152 passed / 0 failed**。
+  根拠は`outputs/dev-brand/final-targeted-test.log`。
+- headless Chromeで実rendererのHTML / CSS / i18nとローカルフォントを使い、英語・日本語、1280 / 800pxで検証した。
+  表示名・折返し・検索ボタンの収まり・pageerror 0と、256 / 128 / 48 / 32 / 16pxアイコンを確認した。
+  画面とログは`outputs/dev-brand/`。外部通信は遮断し、実Venice送信は行っていない。
+
+### 不明なこと
+
+- 起動中の開発アプリは再起動していないため、実nativeウィンドウ・About・トレイ・Dockの反映は未確認。
+  native側は接続コード・翻訳契約のテストと型チェックで確認した。
+- 全体実行は1回という指定を守り、VM依存補完後の全体再実行は行っていない。
+  修正後は失敗ファイルと関連テストの対象実行で確認した。最終候補の全体0 failedという実行記録はない。
+
+### 次に確認したいこと
+
+- 次の開発アプリ再起動時に、ウィンドウ・About・トレイの表示名とDockアイコンを確認する。
+  `productName` / `appId`を使うアプリメニューやインストール名などは、今回の表示名変更の対象外。
+
+## 2026-11-24 — dev/prodの表示名分離と再検証
+
+### 分かったこと
+
+- 前commit`ba4ecfbe`は表示名が固定されており、パッケージ版にも`(dev)`が出る実装だった。
+  `src/main/app-brand.ts`の1箇所で`app.isPackaged`を判定するよう変更した。
+  開発版は`Chat On Venice (dev)`、パッケージ版は`Chat On Venice`。
+  nativeのタイトル・About・トレイは同じmain所有のキーを使う。
+- mainの既存AppState IPCに表示キーを追加し、rendererは渡されたキーをt / uiで反映するだけにした。
+  index.htmlのtitleと両ヘッダは動的な空の表示先とし、dev名をHTMLへ埋め込まない。
+  旧stateと既存呼出しの互換性のためフィールドは追加のoptionalとし、rendererでdev判定や別の名前推測はしない。
+  ja / en両方にdev / prodキーとdev Aboutメニューのキーを登録した。
+- `package.json` / lockfile / `electron-builder.yml`は変更していない。
+  package名`chat-on-steroids`、productName`Chat On Steroids`、appId`com.chatonsteroids.app`を固定する回帰テストを追加した。
+  app.nameやuserDataを変える処理は追加していない。
+
+#### 前回の3件はVMへ新しい依存を渡し忘れた失敗
+
+`ba4ecfbe`で行ったテスト環境修正の主要差分は次のとおり。
+
+```diff
++import { mainText } from '../src/main/main-texts.js';
+-      layout: {}, icon: null, process: { platform },
++      layout: {}, icon: null, process: { platform }, mainText,
++    expect(options?.title).toBe('Chat On Venice (dev)');
+```
+
+- 既存のdarwin / win32 / linuxの3ケースとfullscreen / sandbox等のassertは維持されている。
+  テストの削除・skipやassertの緩和はなく、タイトルのassertを追加した。
+  今回はconstructorがmain所有のキーを参照するため、同じVMへ`appBrand`も渡した。
+- 前回commitの同じconstructor断片を使い、mainTextの有無だけを変える比較を実行した。
+  3環境とも依存なしでは`ReferenceError: mainText is not defined`、実際のmainText関数を渡すと
+  devタイトルと既存fullscreen条件が成功した。OS / Nodeのフレークではなく、テストハーネスの依存不足だった。
+  根拠は`outputs/dev-brand-review/test-environment-fix.patch`と`test-environment-proof.json`。
+
+#### アイコンの小サイズと出力を確認した
+
+- `npm run icon`に16 / 22 / 32 / 48 / 128 / 256 / 512pxの全出力を追加した。
+  `build/icons/icon*.png`と白単色透過の`ferro-template*.png`を生成する。
+  既存のICO 6サイズ、1024px / preview / runtime PNG、installer BMP、拡張4サイズの出力も維持した。
+- 16pxの角丸タイル版はferroの歯が詰まって見えたため、白いferroだけを大きく配置したトレイ専用版を追加した。
+  mask外の透明画素も縮小時の面積へ数え、歯と隙間をアンチエイリアスする。
+  16 / 32pxの`artwork/trayTemplate.png` / `trayTemplate@2x.png`をチェックインし、macOS devのtemplate imageに使う。
+  devの接続状態はツールチップと既存メニューへ表示し、prodの既存状態ドットは変えていない。
+- `test/dev-icon.test.ts`は一時フォルダーで実際のicon scriptを動かし、全出力・寸法・ICO収録数・透過白の画素を確認する。
+  SVG source、既存script経路、依存パッケージは維持した。手順は`artwork/README.md`。
+- headlessの実HTML / CSS / i18nでdev / prod、英語 / 日本語、1280 / 800pxを検証した。
+  タイトル・ヘッダ・折返し・検索ボタンの収まり・pageerror 0を確認し、全サイズを目視した。
+  根拠は`outputs/dev-brand-review/visual.log`と`outputs/dev-brand/icon-sizes.png`等。
+
+#### macOSで確認したこととアプリメニューの判断
+
+- 開始時点で開発アプリと8766 listenerは停止していた。既存の専用runtimeを使い、8766固定で起動・終了・再起動した。
+  通常CoSは起動していない。実Venice送信は行っていない。
+- 再起動後のnativeウィンドウ名と実rendererのヘッダは`Chat On Venice (dev)`。
+  Aboutには同じ表示名とアプリ版`2.1.54`を確認した（括弧内のElectron runtimeは`44.3.0`）。
+  根拠は`native-window-final.png` / `native-about-final.png`等、同reviewフォルダー内のローカル観測。
+- 実機のmacOSアプリメニューの先頭名は、本番名ではなく開発用runtimeの`Electron`だった。
+  カスタムの先頭ラベルを渡してもmacOSはruntime名を表示したため、先頭名は許容すると決めた。
+  app.setNameを使ってprofileの識別を変えず、devのAbout項目だけ`Chat On Venice (dev)について`に差し替えた。
+  残りの既存メニュー・role・shortcutはそのまま使い、prodのメニューは変更しない。
+- macOSの標準Aboutパネルのアイコンは開発runtimeのElectronマークが残ることを実測した。
+  iconPath指定による差し替えはこの環境の標準パネルへ反映されなかった。表示名と版は反映されている。
+- トレイの白いferroは実メニューバーで確認できた（`native-menubar-strip.png`）。
+  ツールチップとDock画像の確認中にはポインターが他の位置へ移動し、hoverを維持できなかった。
+  agent-desktopのdelivery表示だけでは成功とせず、OSの実ポインター座標と画面を確認した。
+  操作競合を避けるため、ユーザーへ短時間のマウス操作停止を依頼し、この2点の実機確認は保留した。
+
+#### 最終候補の検証結果
+
+- NodeはVoltaの`v22.23.5`。`npm test`を全体で1回実行し、終了コード0。
+  **525 passed / 0 failed / 20 skipped**（ファイル）、**12,838 passed / 0 failed / 218 skipped**（テスト）。
+  skip数は前回から変えていない。今回のコードとテストを固定して実行した。
+  根拠は`outputs/dev-brand-review/full-test.log` / `full-test.exit`。
+- `npm run typecheck`と`npm run build`も成功した（同フォルダーの`typecheck.log` / `build.log`）。
+  関連6ファイル440件、最終候補のbranding / icon / lifecycle 26件も成功した。
+  本番名 / dev名・ja / en・native About / window・メニューの保持・内部識別子・icon全出力に回帰テストを追加した。
+
+### 不明なこと
+
+- パッケージ版を実際に作成して起動する確認は行っていない。packaged=trueのmain分岐、native設定、
+  renderer表示、ja / enカタログは回帰テストとheadless画面で確認した。
+- トレイのツールチップが実際に表示された状態と、Dockのferro画像は未確認。
+  開発アプリは8766固定・既存の専用runtimeで起動したままにしている。
+
+### 次に確認したいこと
+
+- 将来パッケージ版を配布する際に、実bundleの表示名とアイコンを確認する。
+- マウス操作が競合しない時間に、起動中の開発アプリのツールチップとDock画像を確認する。
+  短い操作停止の可否はユーザーへ確認中。この2点の記録が揃ったら実機確認を完了扱いにする。
+
+## 2026-11-24 — brand/dev-nameを2.1.55へrebase
+
+### 分かったこと
+
+- 対象は`brand/dev-name`だけ。開始時はcleanで、元tipは`21fb547f`。
+  upstreamは`https://github.com/totec448-spec/chat-on-steroids.git`が登録済みだった。
+  fetchでは既存`canary`タグの移動だけが拒否され、v2.1.55とupstream/mainは取得できた。
+  無関係なタグは強制更新していない。当たり判定の生ログは`outputs/brand-rebase-2155/impact.log`。
+- `git rebase --rebase-merges v2.1.55`は完了した。v2.1.55のcommitは`a6936f41`。
+  衝突は初期manifestのname / version周辺と、12ロケール末尾の追加キーだった。
+  manifestは2.1.55とVenice登録を保持し、ロケールはupstream側とVenice側のキーを両方残した。
+  機能単位で片側を捨てる解消はしていない。
+- rendererのupstream 12カタログと追加en.jsonを維持した。各upstreamカタログについて
+  v2.1.55の全キーが残ることを照合した。dev / prod名の追加はja / enだけ。
+  enには2.1.55のsourceキー12件と、`Restored {0} of {1} files|one`の単数形を補った。
+  単数形の値は既存`turn-changes.ts`のtn呼出しと同じ`Restored {0} of {1} file`。
+- `src/main/version.ts`、package / lockfile、拡張の版は2.1.55。
+  `scripts/verify-whats-new.cjs`はv2.1.55と差分がなく、2.1.55のleadを期待する版を採用した。
+  `codex/venice-exec`は元の`5543094a`のままで、rebaseもpushもしていない。
+
+#### テスト環境修正の棚卸し
+
+- 元`ba4ecfbe`（rebase後`30d37073`）をgit showで確認した。
+  `window-lifecycle.test.ts`へ実mainTextのimportとVM注入、タイトルassertを追加した差分は維持する。
+  後続のmain所有キーに必要なappBrand注入も維持する。初回3件のReferenceErrorは、この依存注入で説明できる。
+  主要差分は前節に掲載済み。元diffは`kept-test-environment.patch`、rebased diffは`rebased-test-environment.patch`に保存した。
+- #2261の`cdcaa8fc` / merge `f4c63cdd`は、rebase前から共通祖先だった。
+  timelineテストはv2.1.55と同一で、同じ修正がブランチ差分に重複していなかった。
+  したがって削除した重複ハンクは0件。#2261のimmediate / deferred両ケースとUI待機のassertをそのまま採用した。
+  根拠は差分なしの`timeline-vs-upstream.diff`。テストの削除・skip追加・assert緩和は行っていない。
+- 関連8ファイルの確認では#2261の2ケースだけが並列時に待機期限で失敗した。
+  同じ2ケースの単独実行は両方成功し、その後の全体実行でもこの2ケースは成功した。
+  テストは変更せず、並列時のフレーク候補として記録する。原因は確定していない。
+
+#### dev判定・識別子・macOSメニューの判断
+
+- 判定は`src/main/app-brand.ts`の`!app.isPackaged`の1箇所に集約したまま。
+  devは`Chat On Venice (dev)`、prodは`Chat On Venice`をmainが選び、既存AppState IPCでrendererへ渡す。
+  index.htmlのtitleとヘッダは動的表示で、ja / enカタログを直接検証する回帰テストを維持した。
+  productName`Chat On Steroids`はパッケージ版の既定userDataを動かさないため、
+  appId`com.chatonsteroids.app`は既存native識別を維持するため据え置く。
+  devのuserDataは`--user-data-dir`で固定しており、このproductName判断とは分ける。
+  macOSの開発起動の先頭メニューは本番名ではなく`Electron`と実測したため、このruntime名を許容する。
+  app.setNameで識別を変えず、devのAbout項目だけを識別可能な文言にする方針も維持した。
+- npm ci後にElectron runtimeが未展開だったため、インストール済み公式electronパッケージのinstall.jsで展開した。
+  設定や依存versionは変えていない。`npm ci`は成功し、既存依存のaudit表示は15件（8 moderate / 7 high）だった。
+  audit fixや無関係な依存更新は行っていない。
+- 8766固定、既存の専用runtimeで再起動した。実ウィンドウ名・ヘッダは`Chat On Venice (dev)`、
+  Aboutは同じ名前と`2.1.55`（runtime `44.3.0`）。Dockには新しいティール / 白のferroを実機で確認した。
+  根拠は`native-window.png` / `about.png` / `dock-live.png`。
+  /helloもversion 2.1.55 / bridge 15 / paired:trueだった。実Venice送信は行っていない。
+
+#### アイコンとインストーラ画像
+
+- `npm run icon`で16 / 22 / 32 / 48 / 128 / 256 / 512pxを再生成し、各サイズを目視した。
+  16pxタイル版は歯が詰まるが、22 / 32 / 48では輪郭が明確になり、128 / 256 / 512では歯と曲線が明瞭。
+  既存の白単色透過トレイ専用版を維持し、devのmacOSではこのtemplateを使う。
+  legacy ICO / PNG / BMPと拡張4サイズを含む生成一式も、実scriptを動かす回帰テストで確認した。
+- artworkには別の古いインストーラ用ヘッダ / サイドバー原画はない。
+  同じsource PNGから生成する`build/installerHeader.bmp`（150×57）と`installerSidebar.bmp`（164×314）は、
+  どちらも現在のferroへ更新されていることを目視した。寸法・teal画素の回帰テストも追加した。
+  根拠は`installer-branding.png`と`test/dev-icon.test.ts`。
+
+#### 検証結果と実行回数
+
+- `npm ci`、最終カタログでの`npm run typecheck` / `npm run build`は成功。
+  icon / headless画面確認も成功した。ログは`outputs/brand-rebase-2155/`に保存した。
+- 最初の全体実行は英語の`Restored {0} of {1} files|one`不足で1件失敗した。
+  診断には同じ`full-test.log`を使い、テストやassertは変えず英語カタログを補完した。
+  該当の既存source監査とbranding / iconの21テストは全て成功した。
+- 指定の「全体1回」に対して、初回が失敗したため、0 failedの受入を確認する最終候補でもう1回実行した。
+  合計2回の全体実行で、最終結果は**525 passed / 0 failed / 20 skipped**（ファイル）、
+  **12,853 passed / 0 failed / 218 skipped**（テスト）、終了コード0。
+  `final-full-test.log` / `final-full-test.exit`が根拠。#2261の2ケースも最終全体で成功した。
+- カタログの最終照合では、upstream 12ロケールの全キーと、2.1.55で追加された各41〜44キーの値を保持していた。
+  ja / enのdev / prod名はfallbackでなく直接登録を確認した（`catalog-audit.log`）。
+  git diffでテストファイルの削除・skip追加がないことも確認した。
+
+### 不明なこと・残る確認
+
+- この時点で残したトレイのツールチップ目視は、下記の追加確認で解消した。
+  外部ディスプレイで実際の表示を確認し、証跡を保存した。
+
+### 次に確認したいこと
+
+- トレイの追加確認結果は次節に記録する。
+
+## 2026-11-24 — userData・トレイ・パッケージ版の追加確認
+
+### 分かったこと
+
+#### 1. userDataの実値とreadyの順序
+
+- `app.getPath('userData')`で取得した実値を、表示名の適用前後にログへ出した。
+  devでは前後とも`/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime`で、
+  `ready=true; packaged=false; unchanged=true`。従来の起動引数で指定していた専用runtimeと一致する。
+  devの保存先が固定される直接の理由は`--user-data-dir`の明示指定であり、productName据え置きではない。
+  根拠は`outputs/venice-read-live/runtime/app.log`の`branding:`行。
+- パッケージ版も隔離した検証用profileを使い、前後とも
+  `/Users/atsu/chat-on-venice/outputs/brand-native-validation/packaged-runtime`、
+  `ready=true; packaged=true; unchanged=true`を記録した。通常版の保存先は検証に使っていない。
+  この検証用パッケージ版も明示パス指定である。productNameを据え置く理由は、明示指定なしで
+  パッケージ版を起動した場合の既定userDataを動かさないためであり、両者を区別する。
+- `src/main/index.ts`と`src/main/app-brand.ts`に`app.setName()`、`app.name =`、
+  `app.setPath()`による識別子変更はない。`!app.isPackaged`の判定自体はmodule読込時だが、
+  nativeの表示名適用は`app.whenReady()`後。ready前の名前変更でprofileを動かす経路は追加していない。
+  このログは同じ起動内の適用前後の比較であり、過去の未記録のgetPath値を再現したものではない。
+
+#### 2. トレイの設定値と実表示
+
+- 使用中のElectron 44.3.0は`Tray.setToolTip()`を提供するが、`Tray.getToolTip()`は提供しない。
+  installedの`electron.d.ts`と[Electron 44のAPI実装](https://github.com/electron/electron/blob/v44.3.0/shell/browser/api/electron_api_tray.cc)を照合した。
+  存在しないgetterの戻り値は作らず、実行時に
+  `branding: tray.getToolTip=unavailable; configured="Chat On Venice (dev)"`と記録する。
+- tooltipは接続状態の接尾辞を外し、正確に`Chat On Venice (dev)`へ揃えた。
+  接続状態は既存のトレイメニューに残る。
+- 外部ディスプレイの可視領域にある白いferroを実際にhoverし、
+  `Chat On Venice (dev)`のネイティブtooltipを目視した。
+  根拠は`outputs/brand-native-validation/tooltip-verified.png`。
+  メニューを開いた実表示も`tray-menu-external.png`に保存した。
+  確認中に一時的に隠した他アプリとOSのメニューバー項目、時計の日付・曜日はすべて元へ戻した。
+
+#### 3. 小サイズの実ファイル
+
+- `build/icons/icon16.png` / `icon22.png` / `icon32.png` / `icon48.png`を生成して実ファイルを目視した。
+  16pxのタイル版は歯が詰まりferroの細部が読みにくい。22pxは小さいが輪郭が分かり、32/48pxは塗り潰れず歯と曲線を識別できる。
+- トレイ専用の単色透過版は16pxの画素に合わせて調整し、6本の歯の間に1pxの隙間を確保した。
+  当初は白だったRGBを、後述のtemplate形式確認で黒へ変更した。
+  `artwork/trayTemplate.png`は16px、`trayTemplate@2x.png`は同じ形を2倍にした32px。
+  小サイズのcrest・後方の刃・足の輪郭を保ち、実メニューバーでもferroとして読めることを確認した。
+- 既存の`npm run icon`の起動方法、ICO/PNG/BMP・拡張アイコンの出力は維持した。
+  回帰テストは16/22/32/48/128/256/512pxとlegacy出力を列挙し、16pxの歯と隙間のalphaも検証する。
+
+#### 4. macOSのメニュー名を2種類の実行形で確認
+
+- checkoutからのdev実行は`Electron`、このブランチをローカルでパッケージしたappは`Chat On Steroids`だった。
+  両方を各プロセスの実メニューバーから読み取った。根拠は`outputs/brand-native-validation/menu-names.txt`。
+  **両方とも許容する**。devの保存先は明示パスで固定する。
+  パッケージ版の既定保存先と既存native識別子を守るため、productNameとappIdを維持し、表示名のために`app.setName()`を使わない。
+- dev判定はmainの`!app.isPackaged`の1箇所。パッケージ版は開発ブランチからのローカルbuildでも
+  `app.isPackaged=true`なので、ウィンドウ・About・tooltipにはprod側の`Chat On Venice`を使う。
+  productNameは`Chat On Steroids`、appIdは`com.chatonsteroids.app`のまま。
+- 既存の`scripts/package.mjs --platform darwin --arch arm64 --dir`で生成し、
+  `release/mac-arm64/Chat On Steroids.app`のad-hoc封印とnative runtime smoke確認が成功した。
+  根拠は`outputs/brand-native-validation/package.log`。生成時のホスト別ライセンス一覧はartifact側に含め、
+  今回と無関係な依存inventoryの差分はソースへコミットしない。
+
+#### 5. 英語キー不足の原因
+
+- 英語キー不足は**実装側のen.jsonカタログの欠落**だった。テストのfixture不足ではない。
+  `fa39d852`の実diffには2.1.55で増えた12キーと、全体監査で見つかった単数形キー
+  `Restored {0} of {1} files|one`の追加がある。
+  `src/renderer/turn-changes.ts`の既存`tn()`呼出しに対応する値は`Restored {0} of {1} file`。
+- それ以前の初回3件の`window-lifecycle`失敗は別件で、VM環境に新しい`mainText`依存を渡していなかったため。
+  `30d37073`のimportとVM注入のdiffで説明できる。英語カタログの欠落と混同しない。
+  今回、既存テストの削除・skip追加・assertの緩和は行っていない。
+
+#### 6. 最終候補のテスト
+
+- Node 22.23.5で全体`npm test`を今回1回実行し、終了コード0。
+  ファイルは**525 passed / 0 failed / 20 skipped**、
+  テストは**12,854 passed / 0 failed / 218 skipped**だった。
+  根拠は`outputs/brand-native-validation/full-test.log` / `full-test.exit`。
+- branding・icon・window lifecycleの対象テストも**28 passed / 0 failed / 0 skipped**。
+  `npm run typecheck` / `npm run build`も成功した。既存テストの削除・skip追加はdiffにない。
+- 最終buildでdev/prod・ja/en・1280/800pxのheadless表示確認も成功。
+  devを従来の8766 / 専用runtimeで起動し直し、最終ログでもパス不変とtooltipの設定値を確認した。
+  `/hello`はversion 2.1.55 / bridge 15 / paired:trueだった。実Venice送信は行っていない。
+
+#### 7–8. 識別子の回帰テストとWhat's New
+
+- productName/appIdは以前から設定行のリテラルをregexで比較していた。今回さらにYAMLをparseし、
+  `.toBe('Chat On Steroids')` / `.toBe('com.chatonsteroids.app')`で値を直接固定した。
+  ja/enのdev/prodキーもfallbackを使わず直接参照するテストを維持した。
+- 2.1.55のWhat's Newはdevビルドにも含まれ、通常版と同じ更新時の一度だけ表示する条件で出る（devを除外する分岐はない）。
+
+### 不明なこと
+
+- `tray.getToolTip()`の戻り値はAPIが存在しないため取得できない。設定値のログと実際のtooltip表示は両方確認済み。
+
+### 次に確認したいこと
+
+- 次の機能作業は既存のprogressキューで管理する。この追加確認では着手していない。
+
+## 2026-11-24 — トレイの実配線・template形式・上流skip件数
+
+### 分かったこと
+
+- `scripts/make-icon.mjs`は`artwork/trayTemplate.png`（16×16）と
+  `artwork/trayTemplate@2x.png`（32×32）を生成する。
+  mainの`trayIcon()`はmacOSかつdevの場合に
+  `path.join(app.getAppPath(), 'artwork', 'trayTemplate.png')`を読み、
+  そのNativeImageを`new Tray()`と`tray.setImage()`の両方へ渡す。
+  実行時ログは`image="/Users/atsu/chat-on-venice/artwork/trayTemplate.png"; template=true; size={"width":16,"height":16}`。
+  汎用の`build/icon.png`へは接続されておらず、読込先の修正は不要だった。
+- ファイル名の`Template`接尾辞と`setTemplateImage(true)`は既に有効だった。
+  RGBは白だったため、今回、黒（RGB 0/0/0）＋アルファへ統一した。
+  16pxとRetinaの32pxの両方について、全可視画素のRGB・透明画素・6本の歯の隙間をテストで固定した。
+  Retinaファイルと既存のICO/PNG/BMP・拡張用出力を生成する流れは維持している。
+- 外部ディスプレイの**ライトのメニューバーでは黒いferro**、**ダークでは白いferro**を目視した。
+  壁紙色の影響を分けるため、確認中だけメニューバーの背景表示と「透明度を下げる」をonにした。
+  根拠は`outputs/tray-template-validation/light-opaque-screen.png` / `dark-opaque-screen.png`。
+  いずれも実macOSの表示で、画像上の色反転による合成ではない。
+  終了時に外観は元のダーク、背景表示と透明度設定は元のoffへ戻した。
+- 今回のサイズ判定は**汎用タイルではなく、実際に使うトレイ専用のferro**を対象にした。
+  **16px：読める**。6本の歯の間隔、上端の曲がり、後ろの刃と足が残る。
+  **22px：黒い本体の塗りと歯の隙間を保持し、潰れていない**。
+  **32px：2倍の画素グリッドで塗りと隙間を保持し、潰れていない**。
+  **48px：曲面・本体の塗り・歯の隙間を保持し、潰れていない**。
+  この判定では追加の形状変更は不要だった。実ファイルは
+  `build/icons/ferro-template{16,22,32,48}.png`。nativeサイズで並べた確認画像は`outputs/dev-brand/icon-sizes.png`。
+- userDataの理由をdevとパッケージ版で分けて、既存の該当節も修正した。
+  devの保存先は`--user-data-dir=/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime`で明示固定。
+  productNameを`Chat On Steroids`のままにする理由は、**明示パス指定なしのパッケージ版の既定userDataを動かさないため**。
+  前回のパッケージ版検証も隔離profileを明示指定したもので、既定保存先の実測とは区別する。
+
+#### v2.1.55とのskip比較
+
+- 素のタグ`v2.1.55`（`a6936f41`）を`outputs/tray-template-validation/upstream-v2155`に
+  detached worktreeとして展開し、変更なし・Node 22.23.5・同じlockfileの`npm ci`後に全体テストを1回実行した。
+  218は**skippedテスト数**、20は**全テストがskipされたファイル数**であり、passed数ではない。
+
+| 実行範囲 | テスト passed / failed / skipped | ファイル passed / failed / skipped |
+| --- | --- | --- |
+| 素のv2.1.55、今回の全体実行 | 12,749 / 1 / 218 | 509 / 1 / 20 |
+| このブランチ`0e6007cf`、前回の全体実行 | 12,854 / 0 / 218 | 525 / 0 / 20 |
+| 今回の最終候補、skipを含む41ファイルの実行 | 659 / 0 / 218 | 21 / 0 / 20 |
+
+- 今回の最終候補では、上流でskipを含んだ41ファイルを再実行した。
+  JSONレポートの**218件のケース名と20件の全skipファイル名は完全一致**し、追加・消失は各0件。
+  40ファイルは上流と同一、残る`linux-screenshot-consent.test.ts`の差分は既存のja/enカタログassertだけで、
+  skip条件とケース名は同じだった。今回の編集にもskipの追加やテスト削除はない。
+- 上流全体の1失敗は`renderer-timeline.part1.test.ts`の
+  `keeps the prior transcript inert until the selected detail arrives and fences A to B to A (immediate traces)`。
+  現在の回答が待機期限内に表示されなかった。同じ素のworktreeで該当ファイルを単独実行すると
+  **111 passed / 0 failed / 0 skipped**で再現しなかった。テストは変更していない。
+- 根拠は`upstream-tests.log` / `upstream-tests.json` / `upstream-timeline-isolated.log`、
+  `current-skip-audit.log` / `current-skip-audit.json`、`skip-comparison.json`（すべて`outputs/tray-template-validation/`）。
+  前回のブランチ全体結果は`outputs/brand-native-validation/full-test.log`。
+- 変更対象のbranding・icon・tray imageのテストは**19 passed / 0 failed / 0 skipped**。
+  typecheck、build、JS構文検査、headless表示確認も成功した。
+  今回はskip比較を必要な41ファイルで行い、ブランチ全体の再実行はしていない。
+
+### 不明なこと
+
+- 上流のtimeline失敗は単独では再現せず、原因の確定はしていない。skip件数・対象の一致は確認できた。
+
+### 次に確認したいこと
+
+- 次の機能作業は既存のprogressキューに従う。今回の変更はトレイ・回帰テスト・確認記録に限定した。
+
+## 2026-11-24 — パッケージのトレイ資産を統合（実機表示は後続の追試で完了）
+
+### 分かったこと
+
+#### 1–2. 収録対象と正・派生
+
+- 元の`electron-builder.yml`の`files`は`out/**`と`package.json`等で、
+  `artwork/trayTemplate.png` / `trayTemplate@2x.png`は含まれていなかった。
+  実読込用の正を`build/icons/trayTemplate.png` / `trayTemplate@2x.png`へ移し、
+  読まれない`artwork`側の2ファイルと、そのディレクトリへの生成を削除した。
+- native画像は`extraResources`で実ファイルとして収録する。
+  `build/icons`から2ファイルだけを`Contents/Resources/icons`へコピーし、
+  Dock/Aboutの`build/runtime-icon.png`は`Contents/Resources/runtime-icon.png`へコピーする。
+  Linuxが既に使っていたruntime-iconの収録先も維持した。
+- `appBrandAssetPath()`が、checkoutでは`<appRoot>/build`、パッケージ版では
+  `process.resourcesPath`を選ぶ。トレイはその`icons/trayTemplate.png`と`icons/trayTemplate@2x.png`を読み、
+  1x/2xのPNG表現を明示して`setTemplateImage(true)`を設定する。
+  final artifactの`app.asar`内にはartwork版やbuild/icons版の重複はない。
+- `ferro-template*.png`は確認専用の派生。16/32pxは実読込用と同じエンコード済みバイトから生成し、
+  その他のサイズも同じmask関数から生成する。回帰テストは正と派生のバイト一致と、artwork版を生成しないことを確認する。
+  `npm run dev` / `npm run build`には`predev` / `prebuild: npm run icon`を追加し、既存の起動・build方法だけで資産が揃うようにした。
+  packageスクリプトも同じgeneratorを使う。
+- final artifactの実収録を確認した。`trayTemplate.png`は16×16、`trayTemplate@2x.png`は32×32、
+  runtime-iconは256×256。根拠は`outputs/packaged-ferro-validation/effective-assets.json`。
+
+#### 3. パッケージ実行の確認と未達（当時の記録）
+
+- `scripts/package.mjs --platform darwin --arch arm64 --dir`で実物を生成し、
+  `release/mac-arm64/Chat On Steroids.app`を隔離profileで起動した。
+  最終packageの内部build、ad-hoc封印、既存native runtime smokeは成功した。
+  根拠は`outputs/packaged-ferro-validation/package-delivery.log` / `package-delivery.exit`。
+- mainのdev判定を`!app.isPackaged || process.env.COS_DEV_BRAND === '1'`へ拡張した。
+  通常パッケージはprodのまま。今回のパッケージ確認は`COS_DEV_BRAND=1`を明示した。
+  productName / appId / userDataの識別子は変更していない。
+- 実パッケージのログで`packaged=true`、userDataの前後一致、
+  `Contents/Resources/icons/trayTemplate.png`の読込、`template=true`、16×16を確認した。
+  tooltipのsetterへ渡した文字列は正確に`Chat On Venice (dev)`だった。
+  NativeImageの実デコードでも非透明画素73個を確認し、空画像ではなかった。
+  ウィンドウのAXタイトルとrenderer URLも、この実パッケージの`Chat On Venice (dev)`だった。
+- **この時点ではferroとtooltipの目視が未達で、項目3を保留とした。後続の「トレイの実行時診断と実表示」で保留を解除した。**
+  ライト・ダーク両方で確認したが、アイコンを可視表示できなかった。
+  メニューバー項目の一時非表示、表示許可の再確認、通常版の一時終了、
+  ユーザー承認済みのSystemUIServer / ControlCenter再起動後にも確認した。
+  パッケージ内で同じPNGを使って作った診断用の最小Trayでも表示を確認できず、
+  画像の収録漏れや空画像とは別の問題が残る。原因は未特定で、OS不具合とは断定していない。
+  GUIDを変える切り分けでも改善せず、その変更は採用していない。
+- 診断用Trayと検証用パッケージのプロセスは終了した。
+  ユーザー指定どおり通常版を再起動し、8765の`/hello`でversion 2.1.55 / bridge 15 / paired:trueを確認した。
+  開発アプリも従来の8766 / 専用runtimeへ戻し、paired:trueを確認した。
+  一時変更した13個のメニューバー項目、背景表示、透明度設定、外観は元へ戻した。
+  Mac全体の再起動は行っていない。
+
+#### 4. 全体テスト1回
+
+- アセット配線・dev判定・native画像読込を反映したソースで、Node 22.23.5の全体`npm test`を1回実行し、終了コード0。
+  **テスト：12,858 passed / 0 failed / 218 skipped。ファイル：525 passed / 0 failed / 20 skipped。**
+  根拠は`outputs/packaged-ferro-validation/full-test.log` / `full-test.exit`。
+  最終typecheckも成功した。既存テストの削除・skip追加はない。
+  その後、通常のbuild入口にも資産生成を補完し、対象テストと`npm run build`で確認した。
+
+#### 5. 素のv2.1.55で確認した既知のflake
+
+- 素の`v2.1.55`の全体実行で`renderer-timeline.part1.test.ts`の
+  `keeps the prior transcript inert until the selected detail arrives and fences A to B to A (immediate traces)`
+  が1 failedになった。該当ファイルの単独実行は111 passed / 0 failed / 0 skippedで再現しなかったため、
+  **既知のflakeとして記録する**。テストとassertは変更していない。
+  根拠は前節の`outputs/tray-template-validation/upstream-tests.log` / `upstream-timeline-isolated.log`。
+
+### 不明なこと・残作業
+
+- この時点の残作業は項目3の目視確認だった。後続の追試でライト・ダークのferroとtooltipの実表示を確認した。
+
+### 次に確認したいこと
+
+- 当時はCodexが目視確認を引き継いだ。追試の結果と再利用できる観測手順は次節に記録する。
+
+## 2026-11-24 — トレイの実行時診断と実表示
+
+### 分かったこと
+
+#### 1. 成果物の配置
+
+再ビルドした`.app`に対する`find`の結果は次の2ファイル。`ferro-template*.png`は確認用派生なので収録せず、
+`app.asar`のエントリ一覧にも`ferro` / `trayTemplate`を含むファイルはなかった。
+
+```text
+/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate@2x.png
+/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate.png
+```
+
+根拠: `outputs/tray-runtime-diagnosis/find-packaged-assets.log`。実読込用ファイルは`extraResources`側だけにある。
+
+#### 2. 実行時の画像・Tray・readyを記録
+
+`src/main/index.ts`の既存Tray初期化にdev/macOS限定の構造化ログを追加した。
+この時点ではdevで既定出力だったが、現行の出力条件は後続「ブランディングのクローズ前確認」の明示フラグ方式に変更した。
+実パッケージの実行ファイルをターミナルから`COS_DEV_BRAND=1`、8767、隔離profileで起動した結果は次のとおり。
+
+| フィールド | 実測値 |
+| --- | --- |
+| imagePath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/icons/trayTemplate.png` |
+| exists | `true` |
+| fromPathEmpty（`createFromPath(...).isEmpty()`） | `false` |
+| imageEmpty（実際に渡したPNG buffer由来の画像） | `false` |
+| template / imageSize | `true` / 16×16 |
+| trayCreated / trayDestroyed | `true` / `false` |
+| ready / packaged | `true` / `true` |
+| resourcesPath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources` |
+| appPath | `/Users/atsu/chat-on-venice/release/mac-arm64/Chat On Steroids.app/Contents/Resources/app.asar` |
+
+根拠: `outputs/tray-runtime-diagnosis/runtime/app.log`、ターミナルの起動記録は`packaged-terminal*.log`。
+`new Tray(...)`は既存の`app.whenReady().then(...)`内で実行される。
+`isPackaged`でTray生成を省く分岐はない。`appBrand.development && darwin`は画像選択と診断ログだけの分岐。
+secondary instance / 終了中のbootstrapを止める既存ガードと、終了時の`tray.destroy()`は維持した。
+
+初期化直後の`getBounds()`はlayout前で高さ0だったが、描画後の当該PIDのAX status itemは34×24だった。
+最終パッケージ実行のPIDと実座標は`outputs/tray-runtime-diagnosis/packaged-visible-state.json`に保存した。
+
+#### 3. 切り分け結果と観測手順の修正
+
+- 空画像、未生成、ready前の生成、破棄済みのいずれでもなかった。
+  パッケージの解決先は既に`process.resourcesPath/icons/...`で正しく、asarとの混在もなかった。
+  パスや画像、GUID、Tray生成条件は変更していない。
+- 今回は通常版とdevを一時終了して実パッケージのPIDを特定し、そのウィンドウを外部ディスプレイへ移して確認した。
+  外部画面の座標は`x=1512, y=-98`から始まる。主画面だけの観測や非アクティブなメニューバーではなく、
+  対象PIDのAX status itemの位置を取得し、対象画面のアプリをアクティブにして、そのアイコンをクリック／hoverした。
+- 同じ成果物でferroの描画とメニュー操作、ツールチップの実表示まで確認できた。
+  前回の「表示なし」はこの有効な実機観測で訂正し、**項目3の保留を解除する**。
+  OS再起動やOS不具合を前提にした製品側の回避策は不要だった。
+
+#### 4. パッケージ版の実表示
+
+- `npm run build`と`scripts/package.mjs --platform darwin --arch arm64 --dir`を再実行し、内部build・ad-hoc封印・native smokeが成功した。
+  根拠: `outputs/tray-runtime-diagnosis/build.log` / `build.exit`、`package.log` / `package.exit`。
+- ライトの明るいメニューバーでは黒いferro、ダークでは白いferroを確認した。
+  16pxで6本の歯と隙間を識別でき、同じTemplate PNGがテーマに追従した。
+  ライトでのhover表示は正確に`Chat On Venice (dev)`だった。
+- 根拠: `packaged-light-tooltip.png`（黒いferroとtooltip）、`packaged-dark-final.png`（白いferro）、
+  `packaged-click-final.png`（当該トレイのメニュー）。いずれも`outputs/tray-runtime-diagnosis/`内。
+  明暗を明確に比較する間だけメニューバー背景と「透明度を下げる」を有効にし、検証後は元のoffへ戻した。外観も元のダークへ戻した。
+
+#### 5. devを犠牲にしていないことと回帰確認
+
+- devは従来どおり`CLF_BRIDGE_PORTS=8766 npm run dev -- -- --user-data-dir=/Users/atsu/chat-on-venice/outputs/venice-read-live/runtime`で起動した。
+  devの解決先は`/Users/atsu/chat-on-venice/build/icons/trayTemplate.png`。
+  `exists=true`、`fromPathEmpty=false`、`imageEmpty=false`、`trayDestroyed=false`、`ready=true`、`packaged=false`だった。
+  packageだけは`resourcesPath`、checkoutだけは`app.getAppPath()/build`を使う既存の単一resolverを維持している。
+- devの実メニューバーにも同じferroと`Chat On Venice (dev)`のtooltipを確認した。
+  根拠: `outputs/tray-runtime-diagnosis/dev-dark-tooltip.png`、devの既存runtime内`app.log`。
+- 診断ログが実際の`isEmpty()` / `isDestroyed()`を記録する2ケースを追加し、対象5ファイルは
+  **73 passed / 0 failed / 0 skipped**。型チェックも終了コード0。既存テストの削除、skip、assertの緩和はない。
+  根拠: `outputs/tray-runtime-diagnosis/targeted.log` / `targeted.exit`、`typecheck.log` / `typecheck.exit`。
+
+### 不明なこと
+
+- 前回の各未表示場面の具体的な要因は、当該PID・画面・アクティブ状態を対応付けた記録がなく遡及できない。
+  今回はこれらを揃え、画像パスを変えずに描画とtooltipを確認した。
+
+### 次に確認したいこと
+
+- 同様の確認では、成果物の配置と実行時ログに加え、対象PID・ディスプレイのグローバル座標・アクティブ状態を揃える。
+  setter値だけでtooltipの目視確認を代用しない。
+
+## 2026-11-24 — ブランディングのクローズ前確認
+
+### 分かったこと
+
+#### 1. 診断はdevの明示フラグで1行だけ
+
+- 起動時のuserData、画像、存在しないtooltip getterについて分散していた診断を、1行の構造化ログへ統合した。
+  出力条件は`appBrand.development && COS_TRAY_DIAGNOSTICS === '1' && darwin`。
+  通常のprodではフラグを指定しても出ず、devも既定は出さない。パスの追加probeも同じ条件内だけで実行する。
+- mainのフラグ定義に、native描画の切り分け用に残す理由を1行コメントで記載した。
+  再現する場合だけ、dev起動へ`COS_TRAY_DIAGNOSTICS=1`を付ける。
+  パッケージのdev確認は従来の`COS_DEV_BRAND=1`に加えてこの診断フラグも必要。
+  `configuredTooltip`はsetterへ渡す値であり、nativeのgetter値と混同しない。
+- prodとdevの既定OFF、prodでのフラグ拒否、devの明示ON、1行だけの出力、OFF時に追加画像probeを実行しないことを回帰テストで固定した。
+
+#### 2. outputsは非管理・既存ignoreで除外
+
+- `git ls-files -- outputs/`は0件。
+  `.gitignore`のルート規則`/outputs/`（48行）が`tray-runtime-diagnosis/`、そのJSONとuserData、今回の`brand-closeout/`も除外する。
+  既存規則で十分なので重複するignoreは追加していない。
+- 古いパネルvisual scriptが再実行のたびに追跡済みのdocs画像を上書きする経路も、`outputs/venice-panel/`へ変更した。
+  既存の合成docs画像は保存資料として維持し、今回生成した画像と診断ファイルはコミットしない。
+
+#### 3. 全体テスト1回と追加の検証
+
+- 診断ガードと回帰テストを反映したNode 22.23.5の全体`npm test`は1回だけ実行し、終了コード0。
+  **テスト：12,865 passed / 0 failed / 218 skipped。ファイル：525 passed / 0 failed / 20 skipped。**
+  根拠: `outputs/brand-closeout/full-test.log` / `full-test.exit`。
+- 型チェックとbuildも成功した。同ディレクトリの`typecheck.log` / `typecheck.exit`、`build.log` / `build.exit`が根拠。
+- 以下のレビューで修正した3ファイルはVitest対象外のCJSだけで、全体実行後の製品コードとVitestテストは変更していない。
+  既存の関連CJS 6ファイルは**100 passed / 0 failed / 0 skipped**。
+  パネルのheadless検証も完了・停止・折り畳み・MAIN/ISOLATED分離・明暗desktop/mobile・axe・外部送信ゼロが成功し、生成画像も確認した。
+  根拠: `cjs-regression.log` / `cjs-regression.exit`、`panel-visual.log` / `panel-visual.exit`。
+
+#### 4. v2.1.55との差分棚卸し
+
+- 対象は133ファイル。既存Venice基盤116ファイルは読み取り専用Goose（codex-acp/current）、
+  後続brandingとクローズ前の修正は親Codexで分担した。
+  保存文書は来歴とコピー元との差分、英語のキー＝値エントリはデータ照合で確認し、同一本文の再精読とは区別した。
+  根拠: `outputs/brand-closeout/diff-review.json`、`venice-base-review.log`。
+- 英語12キーの不足という基盤レビューの指摘は、最終候補では既に2.1.55取り込み時に補完済みだった。
+  現行のカタログを巻き戻さず、履歴整理では非brandingの英語補完を基盤側へ収める。
+- 修正した追随漏れは、旧CJSのChatGPT登録期待、初期`localDocument`通知の欠落、`core/read`等を拒む名前の正規表現、
+  パネルvisual scriptのgrant接続不足だった。前者3件は修正前に35件中3失敗を実測した。
+  契約に合わせた厳密な通知列・登録ツール名・通信列のassertと、既存worker harnessへの接続で修正した。
+  検証の削除やskip、製品機能の巻き戻しはしていない。
+- 一時Tray、仮GUID、常時診断、無関係な整形、生成されたライセンス一覧の混入は残していない。
+  `git diff --check`も成功した。既存Veniceのread/write/exec/findと英語fallbackは意図した差分として保持する。
+
+#### 5. 履歴は基盤とbrandingの2コミットへ整理
+
+- `--no-ff`マージを含む作業履歴は、v2.1.55上の「既存Venice基盤」「devブランディング」の2コミットへsquashする。
+  基盤には上記CJSの追随修正と非brandingの英語補完も含め、後者を表示名・アイコン・その回帰確認へ限定する。
+  全部を1コミットに混ぜるより、将来brandingだけを上流用の別ブランチへ取り出しやすい。
+- 旧履歴はローカル`refs/backup/brand-dev-name-before-closeout`に保存する。
+  旧commit番号を記した過去の記録は、この保存履歴を参照できる。
+  `codex/venice-exec`の既存履歴は書き換えない。PR作成、mainへの切替、次のAPI疎通には着手しない。
+
+### 不明なこと
+
+- 上流へ提案するかどうかは未決定。このブランチ全体にはVenice基盤も含むため、表示名だけのPRとしてそのまま提出はしない。
+
+### 次に確認したいこと
+
+- step 0は完了。次の最小疎通とツール成功率の計測は、別途その作業が指示された範囲で実施する。
