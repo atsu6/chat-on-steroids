@@ -1553,3 +1553,48 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - Chromeで開発用拡張を再読み込みし、既に開いているChatGPTタブも再読み込みして旧注入を取り除く。
   通常CoSのChatGPT動作と、開発用拡張のVenice動作を確認する。
+
+## 2026-11-24 — 開発版の表示名とferroアイコン
+
+### 分かったこと
+
+- Venice専用拡張の`81003931`を`codex/venice-exec`へno-ffでマージし、`5543094a`をpushした。
+  その後`brand/dev-name`で表示上のブランドを変更した。
+- メインウィンドウの初期タイトル、rendererのtitle、サイドバーとチャットヘッダの名前、
+  トレイのツールチップ、ネイティブAboutのapplicationNameを`Chat On Venice (dev)`に統一した。
+  rendererの既存t / ui経路とMAIN_TEXTSを使い、ja / enに同じ表示名を登録した。
+  他言語は既存の英語フォールバックを使う。言語変更時はnative側のAboutとタイトルも更新する。
+- `package.json` / lockfile / `electron-builder.yml`は変更していない。
+  `productName`、`appId`、package名は内部の識別子として据え置き、app.setNameやuserDataの変更も行っていない。
+  表示だけを変えることで、既存のユーザーデータ保存先・アプリ識別を動かさず、通常CoSとの見分けを付ける。
+- 新規の`artwork/app-icon-source.svg`は暗いティール`#123e42`の角丸四角と白いferroのオリジナルシルエット。
+  六つの前歯・反対側の歯・上部の曲線を持つ形にした。rendererのi-markにも同じパスを使う。
+  SVGからRGBA PNGを書き出し、既存の`npm run icon`でICO / PNG / BMPと拡張の4サイズを生成した。
+  既存のPNG入力・mask / crop / resampleの流れと出力先は維持し、二色パレットだけを更新した。
+  再生成手順は`artwork/README.md`に記載した。
+- macOS開発起動時のDockには、チェックイン済みのsource PNGを設定する。
+  無視対象のbuild画像の有無に起動を依存させない。packaged版のnativeアイコン選択や、トレイの状態ドットは変更していない。
+- NodeはVoltaの`v22.23.5`。変更箇所のテスト5ファイル135件が成功し、最終変更後の追加6件も成功した。
+  型チェックとbuild、変更したJSスクリプトの構文検査も成功した。
+- 全体`npm test`は指定どおり1回実行し、**523 passed / 1 failed / 20 skipped**（ファイル）、
+  **12,832 passed / 3 failed / 218 skipped**（テスト）。失敗は全て`window-lifecycle.test.ts`の
+  darwin / win32 / linuxのconstructor切出し実行で、VMへ`mainText`が渡されていないReferenceErrorだった。
+  同テストへ実際の`mainText`依存を渡し、既存assertは維持して新タイトルのassertも追加した。
+  テストの削除・skip・assertの緩和は行っていない。全体実行のログは`outputs/dev-brand/full-test.log`。
+  補完後は失敗ファイルを含む関連6ファイルを実行し、**152 passed / 0 failed**。
+  根拠は`outputs/dev-brand/final-targeted-test.log`。
+- headless Chromeで実rendererのHTML / CSS / i18nとローカルフォントを使い、英語・日本語、1280 / 800pxで検証した。
+  表示名・折返し・検索ボタンの収まり・pageerror 0と、256 / 128 / 48 / 32 / 16pxアイコンを確認した。
+  画面とログは`outputs/dev-brand/`。外部通信は遮断し、実Venice送信は行っていない。
+
+### 不明なこと
+
+- 起動中の開発アプリは再起動していないため、実nativeウィンドウ・About・トレイ・Dockの反映は未確認。
+  native側は接続コード・翻訳契約のテストと型チェックで確認した。
+- 全体実行は1回という指定を守り、VM依存補完後の全体再実行は行っていない。
+  修正後は失敗ファイルと関連テストの対象実行で確認した。最終候補の全体0 failedという実行記録はない。
+
+### 次に確認したいこと
+
+- 次の開発アプリ再起動時に、ウィンドウ・About・トレイの表示名とDockアイコンを確認する。
+  `productName` / `appId`を使うアプリメニューやインストール名などは、今回の表示名変更の対象外。

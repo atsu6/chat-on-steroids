@@ -1,8 +1,36 @@
 # App icon artwork
 
-The production icon is generated from `app-icon-source.png` by
+The development icon is generated from `app-icon-source.png` by
 `scripts/make-icon.mjs`. Run `npm run icon` to regenerate the Windows ICO, its preview,
 and the four Chrome extension PNGs.
+
+## 2026-11-24 — Venice development mark
+
+`app-icon-source.svg` is the editable original: a white gondola ferro silhouette,
+with six forward teeth, a rear tooth and a curved blade, on a dark-teal (`#123e42`)
+rounded square. The silhouette is original artwork; no third-party logo is embedded.
+The renderer's `i-mark` sprite uses the same paths at 24/64 scale. Keep both in sync.
+The ferro reference is the [Veneto regional photo description](https://bur.regione.veneto.it/BurvServices/pubblica/burvGalleryDettaglio.aspx?id=986).
+
+The checked-in RGBA PNG remains the input to the existing dependency-free icon script.
+After editing the SVG, rasterize it with the same local headless Chrome/Playwright
+workflow used by the project's visual checks, then regenerate every shipped size:
+
+```sh
+node test/dev-brand.visual.cjs --rasterize-icon
+npm run icon
+node test/dev-brand.visual.cjs
+```
+
+The first command only exports the SVG to the existing 1024px RGBA source.
+The last checks the actual renderer shell in English/Japanese at 1280/800px and writes
+shell screenshots and a 256/128/48/32/16px icon sheet to `outputs/dev-brand/`.
+It uses the locally installed Playwright and Google Chrome, with external requests blocked;
+`npm run icon` itself needs neither Chrome nor a new dependency.
+
+`make-icon.mjs` keeps its source-mask, crop, resampling, ICO/PNG/BMP outputs and invocation.
+Only its two-colour palette changes to teal/white. Build assets remain generated files.
+The original upstream design is recorded below as history.
 
 ## 2026-08-21 redesign
 

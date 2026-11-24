@@ -199,7 +199,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(shownTheme(getConfig().ui.theme), getConfig().ui.appearance),
-    title: 'Chat On Steroids',
+    title: mainText('Chat On Venice (dev)'),
     webPreferences: {
       zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
@@ -409,6 +409,12 @@ function trayIcon(running: boolean): Electron.NativeImage {
   return image;
 }
 
+function refreshNativeBrand(): void {
+  const applicationName = mainText('Chat On Venice (dev)');
+  app.setAboutPanelOptions({ applicationName });
+  if (window && !window.isDestroyed()) window.setTitle(applicationName);
+}
+
 function refreshTray(): void {
   if (!tray) return;
   const state = getStatus().state;
@@ -419,7 +425,7 @@ function refreshTray(): void {
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`Chat On Steroids — ${label}`);
+  tray.setToolTip(`${mainText('Chat On Venice (dev)')} — ${label}`);
   const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -496,6 +502,12 @@ void app.whenReady().then(async () => {
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
+  refreshNativeBrand();
+  onMainTextsChange(refreshNativeBrand);
+  // Display-only branding: never setName(), appId or userData for this development fork.
+  if (!app.isPackaged && process.platform === 'darwin') {
+    app.dock?.setIcon(path.join(app.getAppPath(), 'artwork', 'app-icon-source.png'));
+  }
   await loadConnectorIdentity();
   if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);

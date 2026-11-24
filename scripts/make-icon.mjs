@@ -7,12 +7,11 @@
  *   build/runtime-icon.png    256px Linux BrowserWindow icon, packaged as a real resource
  *   extension/icons/*.png     16/32/48/128 for the Chrome extension
  *
- *   artwork/app-icon-source.png  selected ImageGen concept (the one source image)
+ *   artwork/app-icon-source.png  RGBA raster of app-icon-source.svg (the source image)
  *
- * The selected concept is a single continuous ribbon that folds into both a folder
- * pocket and a conversation tail. It keeps the old product meaning while matching the
- * monochrome, generously rounded app redesign. The source is decoded, reduced to the
- * UI's ink/paper palette, and area-resampled here so every shipped size is reproducible.
+ * The development mark is a white gondola ferro on a dark-teal rounded square.
+ * Keep the existing PNG-to-ICO/PNG/BMP pipeline; its two-colour quantization now uses
+ * the development palette. The editable SVG and its checked-in RGBA raster stay together.
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -24,8 +23,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
 const EXTENSION_SIZES = [128, 48, 32, 16];
 const SOURCE_PATH = path.join(root, 'artwork', 'app-icon-source.png');
-const INK = [12, 12, 14];
-const PAPER = [244, 244, 246];
+const INK = [18, 62, 66];
+const PAPER = [255, 255, 255];
 
 // ------------------------------------------------------------- source png
 
@@ -102,10 +101,9 @@ function decodeSourcePng(encoded) {
 const source = decodeSourcePng(readFileSync(SOURCE_PATH));
 
 /**
- * Image generation left a handful of isolated opaque flecks outside the mark. Keep the
- * largest alpha-connected component only; the ribbon, its outline and the local dot are
- * one continuous component, while dust is not. The threshold also discards the model's
- * near-transparent shadow matte before any downsampling can turn it into a grey halo.
+ * Keep the largest alpha-connected component only. The rounded square and ferro form
+ * one connected mark; the threshold excludes nearly transparent edge pixels before
+ * downsampling. This retains the established source-cleanup and crop behavior.
  */
 function sourceMask() {
   const count = source.width * source.height;
@@ -183,8 +181,8 @@ function sourceCrop() {
 const crop = sourceCrop();
 
 /**
- * Area-resample the generated concept after collapsing its near-monochrome shading to
- * the exact renderer palette. Premultiplied accumulation keeps transparent edges clean.
+ * Area-resample the two-colour source in the development palette.
+ * Premultiplied accumulation keeps transparent edges clean.
  */
 function render(size) {
   const pixels = Buffer.alloc(size * size * 4);
