@@ -47,6 +47,7 @@ import { currentWorkspace, forgetMissingWorkspace, learnWorkspace, setCurrentWor
 import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from '../worktrees/index.js';
 import { getSessionProject, sessionSecretsShieldOff } from '../projects.js';
 import { shieldToolResult } from '../secrets-shield.js';
+import { veniceExecResult } from '../venice-exec.js';
 import { firstTaskRoot, resolveLinkedSkillAlias } from '../skill-access.js';
 import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js';
 import { ExecError } from '../exec.js';
@@ -520,13 +521,17 @@ function noteTransportIdentity(transportKey: string | null): void {
  * A project that cannot be read keeps the shield on. The log names what was hidden, never the value.
  */
 async function shieldOutput(context: CallContext, name: string, result: ToolResult): Promise<ToolResult> {
+  return shieldSessionToolOutput(context.caller.sessionId, name, result);
+}
+
+/** The same output policy for host-admitted observations that do not execute another tool. */
+export async function shieldSessionToolOutput(sessionId: string | null | undefined, name: string, result: ToolResult): Promise<ToolResult> {
   if (getConfig().ui.secretsShield === false) return result;
   const shielded = shieldToolResult(result);
   if (!shielded.masked.length) return result;
   const counts = new Map<string, number>();
   for (const kind of shielded.masked) counts.set(kind, (counts.get(kind) ?? 0) + 1);
   const what = [...counts].map(([kind, count]) => `${count} ${kind}${count > 1 ? 's' : ''}`).join(', ');
-  const sessionId = context.caller.sessionId;
   const projectOff = sessionId ? await sessionSecretsShieldOff(sessionId).catch(error => {
     logWarn(`secrets shield: could not read this chat's project (${error instanceof Error ? error.message : String(error)}); masking anyway`);
     return false;
@@ -1641,6 +1646,9 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
           : await shieldOutput(context, name, result);
         if (!origin.current()) delivered = fail('RUN_REVOKED');
         else if (reading && !effectiveCapabilities(getConfig()).read) delivered = fail('TOOL_DISABLED: read requires reading permission.');
+        if (name === 'exec_command' && delivered.structuredContent && !delivered.isError) {
+          delivered = veniceExecResult(delivered.structuredContent as unknown as import('../../shared/venice-integration.js').VeniceExecOutput);
+        }
         if (origin.preview) return delivered;
         await recordToolCall({ hostAdmitted: { runId: origin.runId, sessionId: origin.sessionId },
           tool: name, args, content: delivered.content, outcome: context.outcome ?? (delivered.isError ? 'tool_rejected' : 'ok'),

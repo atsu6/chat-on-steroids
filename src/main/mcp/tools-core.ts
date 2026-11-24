@@ -7,6 +7,7 @@ import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig, effectiveCapabilities } from '../config.js';
 import { previewVenicePatch } from '../venice-patch-preview.js';
+import { veniceExecResult } from '../venice-exec.js';
 import { createHash } from 'node:crypto';
 import { checkAutomaticSend } from '../send-check.js';
 import { liveConnectorName } from './surfaces.js';
@@ -1056,10 +1057,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
             logInfo(`tool exec_command ${shell.shellType} -> ${output.processId ?? `exit ${output.exitCode ?? 'unknown'}`}`);
             if (venice?.exec) {
-              const snapshot = venice.exec.snapshot();
-              const text = `Process ID: ${snapshot.processId}\nExit code: ${output.exitCode ?? 'running'}\nstdout:\n${snapshot.stdout}\nstderr:\n${snapshot.stderr}` + (snapshot.truncated ? '\n[output truncated]' : '');
-              return { content: [{ type: 'text' as const, text }], structuredContent: { ...snapshot, exitCode: output.exitCode, running: output.processId !== null,
-                output: { stdout: snapshot.stdout, stderr: snapshot.stderr } } };
+              return veniceExecResult({ ...venice.exec.snapshot(), exitCode: output.exitCode, running: output.processId !== null });
             }
             // `benign` was previously spent only on the error count, leaving the model to read
             // `Process exited with code 1` under an empty body and re-run a search that had

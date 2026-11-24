@@ -23,6 +23,7 @@
  * execution; revocation does not undo an effect already started. Previously recorded
  * calls may only be read by their independently authenticated original owner. A revoked
  * run cannot be revived by a request; a new approval needs a new app-issued runId.
+ * Venice shell also terminates the run-owned live process trees on revocation.
  */
 export interface VeniceToolCallRequest {
   runId: string;

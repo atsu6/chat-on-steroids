@@ -87,7 +87,7 @@ it('enforces the existing command allowlist and live command capability', async 
   try {
     await saveConfig({ ...config, capabilities: { ...config.capabilities, command: false } });
     expect((await gateway.call(request(g.runId), sender)).result).toMatchObject({ isError: true });
-    await saveConfig({ ...config, commandAllowlist: { enabled: true, rules: [] } });
+    await saveConfig({ ...config, commandAllowlist: { ...config.commandAllowlist, enabled: true, mode: 'allow', rules: [] } });
     expect((await gateway.call(request(g.runId), sender)).result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('COMMAND_NOT_ALLOWED') }] });
   } finally { await saveConfig(config); }
 });
@@ -98,6 +98,25 @@ it('retains a shared 64KiB prefix budget, drops the tail and keeps stderr separa
   expect(output.stderr).toBe('error-line\n'); expect(output.stdout.startsWith('xxx')).toBe(true);
   expect(output.stdout).not.toContain('TAIL'); expect(output.stdout + output.stderr).toHaveLength(65536);
   expect(output.truncated).toBe(true); expect(output.omittedBytes).toBe(70000 + 4 + 11 - 65536);
+});
+
+it('applies the existing secrets shield to both the exec result and live output observations', async () => {
+  const g = await grant(); const synthetic = 'sk-' + 'SyntheticOnly'.repeat(4);
+  const req = request(g.runId, `printf '${synthetic}\\n'; printf '${synthetic}\\n' >&2; sleep 0.1`);
+  const output = result(await gateway.call(req, sender));
+  for (const snapshot of [output, (await gateway.execOutput(req, sender))!]) {
+    expect(snapshot.stdout).not.toContain(synthetic); expect(snapshot.stderr).not.toContain(synthetic);
+    expect(snapshot.stdout).toContain('hidden by Chat On Steroids'); expect(snapshot.stderr).toContain('hidden by Chat On Steroids');
+  }
+});
+
+it('keeps the published 64KiB limit even when the secrets shield expands repeated short settings', async () => {
+  const g = await grant(), req = request(g.runId, `awk 'BEGIN { for(i=0;i<2500;i++) print "API_TOKEN=abcdefgh12345678" }'`);
+  const output = result(await gateway.call(req, sender));
+  for (const snapshot of [output, (await gateway.execOutput(req, sender))!]) {
+    expect(Buffer.byteLength(snapshot.stdout) + Buffer.byteLength(snapshot.stderr)).toBeLessThanOrEqual(65536);
+    expect(snapshot.stdout).not.toContain('abcdefgh12345678'); expect(snapshot.truncated).toBe(true);
+  }
 });
 
 it('defaults wait to 10 seconds and caps explicit waits at 30 seconds without changing other exec callers', async () => {
