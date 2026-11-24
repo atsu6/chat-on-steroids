@@ -1522,3 +1522,34 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 残キューの5：write_stdin。execのrun所有者とprocessIdを使って継続を接続する。
   2.1.55が出ていれば先にマージする。7の履歴UIは引き続き未着手。
+
+## 2026-11-24 — 開発用拡張の自動注入をVenice専用にする
+
+### 分かったこと
+
+- 通常CoSとの二重フックでChatGPTが固まるというユーザー報告を受け、開発用manifestの
+  `content_scripts`から`https://chatgpt.com/*` / `https://chat.openai.com/*`だけを対象にした3登録を削除した。
+  対象ホストがなくなる登録自体を外し、無効な空の`matches`は残していない。
+  ChatGPT側は通常のChat On Steroidsが担い、開発用拡張の自動注入先はVeniceだけにする。
+- VeniceのMAIN / document_start登録（`usage.js`を含む）とISOLATEDのbridge / panel登録は変更していない。
+  `usage.js`のVenice分岐もそのまま残す。`background.js`と各スクリプト本体は変更していない。
+  比較元`134a22e7`との構造比較で、`content_scripts`以外のmanifest全項目とVeniceの3登録が同一であることを確認した。
+  name / version / host_permissionsも変更していない。
+- ChatGPT自動注入を前提にした既存4テストファイルを開発用manifestの期待値へ合わせた。
+  テストの削除やskipは行わず、palette本体やpopupのi18n読込順の検証も維持した。
+- NodeはVoltaの`v22.23.5`。旧・新登録に含まれる12スクリプトの`node --check`が全て成功。
+  manifest関連の既存5ファイル435テストと、Veniceの送信・bridge・panelの合成50テストは全て成功した。
+  ログは`outputs/dev-extension-venice-only/targeted-test.log`と`venice-regression.log`。
+- 全体`npm test`は1回実行し、終了コード0。
+  **523 passed / 0 failed / 20 skipped**（ファイル）、**12,829 passed / 0 failed / 218 skipped**（テスト）。
+  既存のskip数は変えていない。根拠は同フォルダーの`full-test.log`と`full-test.exit`。
+
+### 不明なこと
+
+- 実Chromeで通常CoSと併用した際のフリーズ解消は未検証。今回はmanifestと合成テストで検証した。
+  programmatic injection等のbackground処理は、指示どおり変更していない。
+
+### 次に確認したいこと
+
+- Chromeで開発用拡張を再読み込みし、既に開いているChatGPTタブも再読み込みして旧注入を取り除く。
+  通常CoSのChatGPT動作と、開発用拡張のVenice動作を確認する。

@@ -36,7 +36,7 @@ it('declares Chrome locale placeholders and loads the shared i18n helper before 
   expect(manifest.name).toBe('__MSG_extension_name__');
   expect(manifest.description).toBe('__MSG_extension_description__');
   expect(manifest.action.default_title).toBe('__MSG_extension_action_title__');
-  expect(manifest.content_scripts[0].js[0]).toBe('i18n.js');
+  expect(html).toContain('src="i18n.js"');
   expect(html.indexOf('src="i18n.js"')).toBeLessThan(html.indexOf('src="popup.js"'));
   expect((html.match(/<script\b[^>]*>/gi) ?? []).every((tag) => /\bsrc=/.test(tag))).toBe(true);
 
