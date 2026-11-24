@@ -6,7 +6,7 @@
 
 旧`b8688e12`はv2.1.55に対する116ファイルのVenice基盤コミット。
 前回の133は、この116ファイルと旧brandingの26ファイルの和集合（9ファイルが重複）であり、branding単体が133ファイルになった数字ではない。
-recon・SSE・DOM/タブのagent loop、extensionのVenice専用化、runごとのread/write/shell承認、
+recon・SSE・DOM/タブのagent loop、extensionの静的登録のVenice専用化、runごとのread/write/shell承認、
 `/venice/tools`とkernelのread/apply_patch/exec_command/find接続、出力・差分表示、失効・プロセス終了、
 i18n fallbackなど、製品動作を変更している。
 
@@ -23,9 +23,80 @@ i18n fallbackなど、製品動作を変更している。
   `c4931465..1253e3ef`の基盤変更117ファイルを対象にした。重複116、旧側だけ0、
   新側だけ1（このscope文書）。重複の内容は88ファイルが完全一致、28ファイルが異なる。
   後者には2.1.55の更新、branding、CJS検証修正、記録が含まれる。Venice gateway／exec／findなどの実装は一致する。
-- 上流へ提案するのは`c4931465c8fb023dc99faa9b06fcf2667173b294`のbranding単体だけ。
-  `1253e3ef`と後続のVenice検証・運用変更は自分のリポジトリに残す。
+- 上流向けの元にするのは`c4931465c8fb023dc99faa9b06fcf2667173b294`だけ。
+  提案はdev時の`Chat On Steroids (dev)`接尾辞に絞り、prodの名前・CoSアイコンは維持する。
+  現在のVenice名とferroを含む`c4931465`をそのまま提出しない。
+  PR準備時に上流直上でこのコミットだけを適用して絞り込み、`1253e3ef`と後続のVenice変更は含めない。
   brandingは第1コミットに閉じているが、基盤のロケール変更には別途upstream同期の競合リスクが残る。
+
+## 退役ブランチとの相違28ファイルを全件確認
+
+対象は`archive/venice-exec-retired-20261124`（`5543094a`）と監査開始HEAD `590868eb`。
+旧基盤の変更116ファイルとの重複は116のまま、内容一致88／相違28である。
+28は旧基盤116ファイル内の相違数。`c4931465..590868eb`全体は118ファイルで、
+旧側だけ0／現側だけ2（scope文書とCI workflow）である。
+以下の全28件を「こちらが新しい」に分類した。「向こうにしかない未移植作業」は0件、今回の取り込みも0件。
+旧側の文書・カタログ・処理・assertの削除側も確認し、単なる変更日時で判断していない。
+
+| # | ファイル | 分類：こちらが新しい理由／旧側を戻さない理由 |
+| --- | --- | --- |
+| 1 | `AGENTS.md` | rebase由来。draft数値診断とturn restoreの説明。差分内容が共通祖先→v2.1.55の差分と完全一致 |
+| 2 | `docs/venice-findings.md` | 以降の作業記録732行の追加。旧文書の全文を先頭からbyte単位で保持 |
+| 3 | `docs/venice-recon.test.cjs` | 以降のテスト修正。旧tipのmanifestも既にVeniceのみの静的登録だったため、古いChatGPT登録の期待値を現物へ合わせた。実機能の削除ではない |
+| 4 | `extension/manifest.json` | rebase由来。差分は版2.1.54→2.1.55だけ。旧tipにもChatGPT静的登録はない |
+| 5 | `package.json` | 2.1.55化、brandingのpredev/prebuild icon生成、CJSの通常テスト入口を追加。旧scriptsとNode固定は保持 |
+| 6 | `src/main/index.ts` | 以降のbranding。旧→現差分がv2.1.55→c4931465の差分と完全一致。旧タイトル／tooltip／画像の置換は意図した表示変更 |
+| 7 | `src/main/ipc.ts` | upstreamのturn restore／checkpointRef追加とbrandingのAppState追加。旧checkpoint確認処理は共通helperへ移り、警告・ボタン・default/cancel条件を保持 |
+| 8 | `src/preload/index.ts` | rebase由来。turn restore APIと型の追加。差分内容が共通祖先→v2.1.55と完全一致 |
+| 9 | `src/renderer/chat.ts` | rebase由来。プロジェクト移動後の再描画とturn restore／undoの接続。差分内容が共通祖先→v2.1.55と完全一致 |
+| 10 | `src/renderer/index.html` | 以降のbranding。動的title／ヘッダとferro mark。旧→現差分がv2.1.55→c4931465と完全一致 |
+| 11 | `src/renderer/locales/de.json` | upstreamの13キー追加だけ。旧キー／値の削除・変更0 |
+| 12 | `src/renderer/locales/en.json` | upstream新機能の英語source 13キーとbranding 3キーを追加。旧キー／値の削除・変更0 |
+| 13 | `src/renderer/locales/es.json` | upstreamの14キー追加だけ。旧キー／値の削除・変更0 |
+| 14 | `src/renderer/locales/fr.json` | upstreamの14キー追加だけ。旧キー／値の削除・変更0 |
+| 15 | `src/renderer/locales/ja.json` | upstreamの12キーとbranding 3キーを追加。旧キー／値の削除・変更0 |
+| 16 | `src/renderer/locales/ko.json` | upstreamの12キー追加だけ。旧キー／値の削除・変更0 |
+| 17 | `src/renderer/locales/pt-BR.json` | upstreamの14キー追加だけ。旧キー／値の削除・変更0 |
+| 18 | `src/renderer/locales/pt-PT.json` | upstreamの14キー追加だけ。旧キー／値の削除・変更0 |
+| 19 | `src/renderer/locales/ru.json` | upstreamの15キー追加だけ。旧キー／値の削除・変更0 |
+| 20 | `src/renderer/locales/tr.json` | upstreamの13キー追加だけ。旧キー／値の削除・変更0 |
+| 21 | `src/renderer/locales/vi.json` | upstreamの12キー追加だけ。旧キー／値の削除・変更0 |
+| 22 | `src/renderer/locales/zh-CN.json` | upstreamの12キー追加だけ。旧キー／値の削除・変更0 |
+| 23 | `src/renderer/locales/zh-TW.json` | upstreamの12キー追加だけ。旧キー／値の削除・変更0 |
+| 24 | `src/renderer/main-texts.ts` | upstreamのturn restore警告1キーとbranding 3キーを追加。旧キーは保持 |
+| 25 | `src/shared/main-texts.ts` | 同じ4キーをnative翻訳の許可一覧へ追加。旧キーは保持 |
+| 26 | `test/i18n-english-fallback.test.ts` | 以降の検証追加。12ロケールと2.1.55キー維持の1ケース追加のみ。既存ケースは保持 |
+| 27 | `test/venice-input.test.cjs` | 現行bridgeのlocalDocument→activateを厳密比較し、既に旧registryにあったcore/name構文と4ツールを検証。旧の登録一覧一致・重複禁止・入力操作assertは保持 |
+| 28 | `test/venice-panel.visual.cjs` | 以降の検証修正。既存bridge harnessでgrant要求／revokeを通す合成RPCとそのassertを追加。旧run／stop／CSS／a11yの検証を保持し、画像出力だけignore対象outputsへ移した |
+
+非英語12カタログの追加キーは、branding 3キーを除きv2.1.55のキー／値と一致する。
+旧tipにしかないファイルも0件。証跡は`outputs/venice-retirement-audit/`の`01.patch`～`28.patch`、
+`locale-retention.json`、`origin-checks.txt`。ログや文書の追記を旧作業の欠落として数えていない。
+
+## ChatGPT側と通常CoSの併存：静的登録だけでは隔離できていない
+
+**現状は「ChatGPTに一切フックしないVenice専用拡張」ではない。通常CoSとの非干渉は未達。**
+
+- `extension/manifest.json`にはVeniceの静的content_scriptsだけがある。
+  新しいChatGPTページへの初期注入はなくなり、旧tipも同じ状態だった。
+- しかし`extension/background.js`の`restoreChatgptTab`は、ChatGPTへ`i18n.js`、`chatgpt-dom.js`、
+  `app-palette.js`、`usage.js`、`fiber.js`、`content.js`とoverlay CSSを動的に注入する。
+  MAIN helperは健康なrecorderが応答した場合にも再注入する経路がある。
+- 呼び出し元はservice worker起動末尾、onInstalled、ensurePaired、maintenanceの
+  `restoreSilentRecorders`（チェック間隔60秒）。静的登録を外してもこの経路は残る。
+  host_permissionsとscripting権限も残っている。現在の関数をそのままVMへ読み込んだ合成実行でも、6スクリプトの注入要求を確認した。
+- よってChatGPTの観測・送信処理は完全撤去されておらず、回復注入後に動作し得る一方、
+  初期注入がないので従来と同じ開始タイミングにもならない。「従来どおり動く」「完全に切れている」のどちらも正確ではない。
+  通常CoSのインストール済みファイルを変更したわけではないが、同じChromeで両拡張を使うと二重注入経路が残る。
+  今回は実ページで二重フックを起こさず、コードと合成実行からこの欠陥を確定した。再フリーズの発生自体は未実測。
+
+backgroundの実装は旧archiveと同一で、manifestの差もversionだけである。
+退役に伴う作業欠落ではなく、先行する「Venice専用化」の未完了が見つかった。
+reconのCJSテストが検査するのは静的manifestと観測器のhost guardであり、この動的回復経路は検査していない。
+
+通常CoSにChatGPTを任せる運用には、開発拡張の動的ChatGPT注入も止める対応が必要。
+今回の監査ではbackgroundを変更せず、この未達を明示する。根拠関数と注入要求は
+`outputs/venice-retirement-audit/chatgpt-reinjection.json`に記録した。
 
 ## 旧b8688e12の全変更ファイル
 
@@ -215,6 +286,15 @@ node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-i
 CIはVitestを直接shard実行するため、`.github/workflows/ci.yml`のLinux `checks` jobにも
 `npm run test:venice`を必須stepとして追加した。ローカルとCIのどちらでも手打ちに依存しない。
 
+### GitHub上での実行状況
+
+`gh run list --repo atsu6/chat-on-venice --branch codex/venice-foundation-and-branding`は0件、
+push済み`590868eb`のcheck-runsも0件だった。PRもない。
+workflowのpush条件は`branches: [main]`なので、このブランチへのpushはCIを起動しない。
+repoのActions permissionsは`enabled: true`であり、Actions無効と推測したわけではない。
+ただしworkflow一覧APIも0件、workflow `ci.yml`の取得APIは404だった（main上のファイル存在は確認）。
+runner上のCIは**未検証**。actionlintとローカルの同じcommandの成功とは分けて扱う。
+
 ## 再配置後HEADの全体検証
 
 実装の再配置後、未変更の`1253e3ef150329f2f435bf6c2af6efc5681b58ef`で実行した。
@@ -244,7 +324,7 @@ workflowの`actionlint`も成功した。今回の追加はscripts／CI／文書
 | モデル：`extension/venice-agent.js`、`extension/venice-send.js` | 現行agentは`sendViaUi`を使い、モデルを選び直さない。Veniceページで選択中のモデルを使用する。未使用の旧`sendTurn`も明示model引数が必須で、URL内の記録値を既定モデルとして使う経路ではない |
 | ポート：`src/shared/browser-bridge.ts`、`src/main/bridge-ports.ts`、`src/main/bridge.ts`、`extension/background.js` | Autoの8765–8769 → 18765–18769 → 38765–38769はupstreamと同じ。新たな既定ポートは追加していない。開発用8766固定は起動時の`CLF_BRIDGE_PORTS`指定で、製品既定値の変更ではない |
 | 起動：`src/main/index.ts`、`src/main/venice-tool-gateway.ts` | 既存のwhenReady後・single-instance guardを維持し、追加の初期化は過去のcall台帳の読み出し。grant復元・ツール再実行・モデル送信は行わない。トレイ診断はdev判定かつ`COS_TRAY_DIAGNOSTICS=1`のときだけ |
-| 拡張の開始条件：`extension/manifest.json`、`extension/venice-agent.js`、`extension/venice-recon.js`、`extension/venice-panel.js` | ChatGPTへのcontent-script登録を外してVenice専用にする、明確な製品動作変更。MAINの設置だけではタスクも記録も始めない。パネルRun後にgrantを要求して開始し、UI送信時に記録を開始する。ステップ既定10／上限40も新しい利用者可視の制御 |
+| 拡張の開始条件：`extension/manifest.json`、`extension/background.js`、`extension/venice-agent.js`、`extension/venice-recon.js`、`extension/venice-panel.js` | 静的登録はVeniceだけだが、backgroundのChatGPT回復注入が残り、通常CoSとの非干渉は未達。Venice側はMAINの設置だけではタスクも記録も始めない。パネルRun後にgrantを要求して開始し、UI送信時に記録を開始する。ステップ既定10／上限40も新しい利用者可視の制御 |
 
 比較で`src/main/config.ts`、`src/main/bridge-ports.ts`、`src/shared/browser-bridge.ts`、
 `src/main/window-lifecycle.ts`にv2.1.55との差分がないことも確認した。
@@ -256,6 +336,6 @@ workflowの`actionlint`も成功した。今回の追加はscripts／CI／文書
 - `c4931465`はbrandingをv2.1.55直上へ作り直したコミット。新しい文書と3キーだけのen catalogを持ち、Venice gatewayへのimportを含まない。
 - その`c4931465`だけを別の素のv2.1.55ブランチへcherry-pickし、typecheck / build / 対象8ファイル190テストが成功した。
 - 既存キーの12言語検査を残し、新規3キーだけのja/en仕様と、全13 UI言語でのfallbackを検証した。基盤の完全en catalogを前提とする統合テストは基盤側に保持した。
-- 正式履歴はbrandingを先、Venice基盤を後にする。上流PRには最初のbrandingコミット`c4931465`だけを選ぶ。
+- 正式履歴はbrandingを先、Venice基盤を後にする。上流向けの元は最初の`c4931465`だけとし、dev接尾辞案へ絞ってから提案する。
 
 証跡: `outputs/brand-isolation/proof-cherry-pick.log`、`proof-typecheck.log`、`proof-build.log`、`proof-tests.log`。全てローカルのignore対象。

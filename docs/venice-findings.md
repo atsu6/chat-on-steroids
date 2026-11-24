@@ -2285,3 +2285,57 @@ node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-i
 
 - 上流PRを作成する際は`c4931465`だけを対象にし、Venice基盤を混ぜない。
 - API最小疎通は別途承認された範囲で行う。今回の検証は実送信を含まない。
+
+## 2026-11-25 — 退役差分の全件監査とChatGPT再注入の残存
+
+### 分かったこと
+
+- archive `5543094a`と監査開始HEAD `590868eb`を比較し、相違28ファイルを全件確認した。
+  全ファイルの分類・理由は`docs/venice-branch-scope.md`の「退役ブランチとの相違28ファイルを全件確認」に掲載した。
+  28件とも「こちらが新しい（rebase由来／以降の作業）」で、旧側だけの未移植作業は0件、今回の取り込み0件。
+  戻さなかったのは、現行に上流更新・branding・検証修正があり、旧内容に戻すとそれらを後退させるため。
+  旧findingsは全文がbyte単位で残り、カタログ13ファイルも旧キー削除0／旧値変更0だった。
+  AGENTS／preload／chatの差分は上流更新と完全一致し、main/index／renderer HTMLの差分は単独brandingと完全一致した。
+  IPCの削除側も確認し、旧checkpoint確認処理は同じ条件を保ってhelperへ移されたものだった。
+- `gh run list`で当該ブランチのCIは0件、`590868eb`のcheck-runsも0件、PRも0件。
+  push条件がmain限定なので、今回のブランチpushはトリガー対象外である。
+  Actions permissionsはenabled:trueだが、workflow一覧APIは0件、ci.ymlのworkflow取得APIは404だった。
+  mainにworkflowファイルがあることは別途確認した。**GitHub runner上のCIは未検証**とする。
+  actionlintとローカル実行の成功をCI実行結果として扱わない。
+- 「Venice専用」の保証が不完全だった。manifestはChatGPTの静的注入を外しただけで、
+  backgroundのrestoreChatgptTab／restoreOpenChatgptTabs／restoreSilentRecordersは残っている。
+  service worker起動時、onInstalled、pairing、maintenanceからChatGPTへ動的に
+  i18n／DOM adapter／palette／usage／fiber／contentとCSSを再注入できる。
+  現物のrestoreChatgptTab関数をVMで実行し、6スクリプトの注入要求を確認した。
+  ChatGPT機能は完全撤去されていない一方、従来の初期注入タイミングは失われている。
+  通常CoSのファイルは変更していないが、同じChromeで両拡張を使う場合の二重フック経路は残る。
+  **通常CoSとの非干渉は未達**としてscopeの既存記述も訂正した。実ページでの再フリーズは起こしていない。
+- `git ls-remote`で`archive/venice-exec-retired-20261124^{}`が
+  `5543094aee1ca147b24d810bcb103152f93ca6d4`を指すことを再確認した。リモートから旧作業を復元できる。
+
+### 上流PRの表示名：接尾辞だけの案を採用する
+
+- 案A：現行のまま、devを`Chat On Venice (dev)`、prodを`Chat On Venice`、ferroアイコンで提案する。
+  fork内では通常CoSとの区別に役立つが、上流CoS自体の製品名・ブランドを変える提案になる。
+- 案B：上流はdevだけ`Chat On Steroids (dev)`にし、prodの`Chat On Steroids`とCoSアイコンを維持する。
+  「開発版を通常版と取り違えない」という目的を、上流の製品名を変えずに満たせる。
+- **案Bを採用する。** このforkのVenice表示は維持する。上流候補の元は`c4931465`だけだが、
+  現コミットはVenice名とferroを含むため、そのままの差分ではPRを出さない。
+  PR準備時は上流直上にc4931465だけを適用し、接尾辞の変更へ絞り込む。基盤コミットは含めない。
+  今回は表示実装・c4931465・PR自体を変更していない。
+
+### 検証件数の再確認
+
+- 今回の変更はscope／findingsだけで、runtime・test・lockfileは全体検証済み`1253e3ef`と同一。
+  全体テストは再実行せず、終了コード0の完全ログと現在の545テストファイルを照合した。
+  Vitestはファイル525 passed / 0 failed / 20 skipped（計545）、
+  テスト12875 passed / 0 failed / 218 skipped（計13093）。CJSは6ファイル100 passed / 0 failed / 0 skipped。
+
+証跡: `outputs/venice-retirement-audit/`の28 patch、locale-retention.json、origin-checks.txt、
+chatgpt-reinjection.json、runs.json、actions-permissions.json、workflows.json、remote-archive.txt、counts-confirmed.json。
+
+### 不明なこと・次に必要なこと
+
+- CIのrunner実行結果はない。CIを受入根拠にするには、GitHub側のworkflow登録状態を確認して実行結果を取得する必要がある。
+- 通常CoSと同時使用するには、開発拡張の動的ChatGPT注入も止める対応が必要。backgroundの修正は今回行っていない。
+- 上流PRはc4931465由来のdev接尾辞案へ絞ってから作成する。API最小疎通は引き続き別作業。
