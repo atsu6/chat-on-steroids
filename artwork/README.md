@@ -36,12 +36,21 @@ cropped around the ferro rather than the teal square, to improve small menu-bar 
 Mask-transparent pixels contribute to the resampling area. The 16px tray template instead
 uses a pixel-hinted ferro: six one-pixel teeth alternate with one-pixel gaps, preserving the
 crest, rear blade and turned foot. Its 32px Retina counterpart doubles the same grid.
-The generator also writes `artwork/trayTemplate.png` (16px) and `trayTemplate@2x.png` (32px).
-These two are checked in so dev startup does not depend on ignored build files; macOS dev
-loads `path.join(app.getAppPath(), 'artwork', 'trayTemplate.png')` and explicitly calls
-`setTemplateImage(true)`. The `Template` filename suffix also identifies the PNG to macOS;
-the `@2x` companion is the Retina representation. macOS selects the visible colour for
-light/dark menu bars. Production keeps the existing connection-status tray icons.
+The canonical runtime files are `build/icons/trayTemplate.png` (16px) and
+`build/icons/trayTemplate@2x.png` (32px). Review copies at 16/32px derive from the same encoded
+bytes; the other review sizes derive from the same mask function. No tray PNG is generated in
+`artwork/`: that directory holds the editable source, not a second runtime copy.
+`npm run dev` and `npm run build` generate the assets through `predev` / `prebuild`; `scripts/package.mjs` already runs the
+same generator. `electron-builder.yml` copies both templates to `Resources/icons` and
+`build/runtime-icon.png` to `Resources/runtime-icon.png` through `extraResources`.
+`appBrandAssetPath()` selects the checkout's `build/` or the package's `process.resourcesPath`;
+the tray, Dock and About use these same generated assets. No artwork source or review copy
+is shipped as a second runtime asset. macOS explicitly calls `setTemplateImage(true)`.
+The `Template` suffix and `@2x` naming remain
+intact; macOS selects the visible colour for light/dark menu bars.
+The sole branding decision remains in main: unpackaged runs are development mode; packaged
+runs use it only with `COS_DEV_BRAND=1`. Ordinary packages keep the production name and
+connection-status tray icons. Product name, app ID and userData identity are unchanged.
 Build assets remain generated files. `test/dev-icon.test.ts` checks the complete outputs
 in an isolated temporary directory, including legacy ICO/PNG/BMP and extension assets.
 The original upstream design is recorded below as history.

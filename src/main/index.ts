@@ -1,5 +1,5 @@
 import { veniceToolGateway } from './venice-tool-gateway.js';
-import { appBrand, refreshNativeBrand } from './app-brand.js';
+import { appBrand, appBrandAssetPath, refreshNativeBrand } from './app-brand.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
 import { steerFromTelegram } from './telegram-steer.js';
@@ -10,6 +10,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
@@ -398,7 +399,9 @@ const windowActivation = createWindowActivationGate(showWindow);
 /** Build the native tray image from encoded PNGs, never platform-dependent bitmap bytes. */
 function trayIcon(running: boolean): Electron.NativeImage {
   if (appBrand.development && process.platform === 'darwin') {
-    const image = nativeImage.createFromPath(path.join(app.getAppPath(), 'artwork', 'trayTemplate.png'));
+    const image = nativeImage.createFromBuffer(readFileSync(appBrandAssetPath('icons/trayTemplate.png')), { scaleFactor: 1 });
+    image.addRepresentation({ scaleFactor: 2,
+      dataURL: `data:image/png;base64,${readFileSync(appBrandAssetPath('icons/trayTemplate@2x.png')).toString('base64')}` });
     image.setTemplateImage(true);
     return image;
   }
@@ -508,7 +511,7 @@ void app.whenReady().then(async () => {
   onMainTextsChange(() => refreshNativeBrand(window));
   // Display-only branding: never setName(), appId or userData for this development fork.
   if (appBrand.development && process.platform === 'darwin') {
-    app.dock?.setIcon(path.join(app.getAppPath(), 'artwork', 'app-icon-source.png'));
+    app.dock?.setIcon(appBrandAssetPath('runtime-icon.png'));
   }
   await loadConnectorIdentity();
   if (windowActivation.isDisabled()) return;
@@ -874,7 +877,7 @@ void app.whenReady().then(async () => {
   const initialTrayImage = trayIcon(false);
   tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform());
   if (appBrand.development && process.platform === 'darwin') {
-    logInfo(`branding: tray image=${JSON.stringify(path.join(app.getAppPath(), 'artwork', 'trayTemplate.png'))}; template=${initialTrayImage.isTemplateImage()}; size=${JSON.stringify(initialTrayImage.getSize())}`);
+    logInfo(`branding: tray image=${JSON.stringify(appBrandAssetPath('icons/trayTemplate.png'))}; template=${initialTrayImage.isTemplateImage()}; size=${JSON.stringify(initialTrayImage.getSize())}`);
   }
   tray.on('click', windowActivation.request);
   refreshTray();

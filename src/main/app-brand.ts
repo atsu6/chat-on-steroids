@@ -4,16 +4,22 @@ import { mainText } from './main-texts.js';
 
 // The only development/production decision for display branding. Never change app.name:
 // Electron uses that identity for the existing userData path and native integration.
-const development = !app.isPackaged;
+// Packaged verification builds opt in explicitly; ordinary packages remain production-branded.
+const development = !app.isPackaged || process.env.COS_DEV_BRAND === '1';
 export const appBrand = {
   development,
   displayName: development ? 'Chat On Venice (dev)' : 'Chat On Venice'
 } as const;
 
+/** Native image APIs read real packaged resources; checkout assets come from the same generator. */
+export function appBrandAssetPath(name: 'icons/trayTemplate.png' | 'icons/trayTemplate@2x.png' | 'runtime-icon.png'): string {
+  return path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'build'), name);
+}
+
 export function refreshNativeBrand(window: BrowserWindow | null): void {
   const applicationName = mainText(appBrand.displayName);
   app.setAboutPanelOptions({ applicationName, applicationVersion: app.getVersion(),
-    ...(development ? { iconPath: path.join(app.getAppPath(), 'artwork', 'app-icon-source.png') } : {}) });
+    ...(development ? { iconPath: appBrandAssetPath('runtime-icon.png') } : {}) });
   if (window && !window.isDestroyed()) window.setTitle(applicationName);
   // Preserve native app-menu identity (Electron in checkout builds), roles and shortcuts.
   // macOS ignores a custom first-menu label: distinguish dev via the About item instead.

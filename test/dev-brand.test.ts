@@ -15,16 +15,23 @@ const native = vi.hoisted(() => ({
 vi.mock('electron', () => native);
 const read = (file: string) => readFileSync(file, 'utf8');
 let dom: JSDOM;
+const resourcesPathDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   native.app.isPackaged = false;
+  vi.stubEnv('COS_DEV_BRAND', '');
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: '/resources' });
   dom = new JSDOM(read('src/renderer/index.html'), { url: 'https://local.test/' });
   for (const key of ['window', 'document', 'Node', 'Element', 'HTMLElement'] as const) {
     vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
   }
 });
-afterEach(() => { vi.unstubAllGlobals(); dom.window.close(); });
+afterEach(() => {
+  vi.unstubAllGlobals(); vi.unstubAllEnvs(); dom.window.close();
+  if (resourcesPathDescriptor) Object.defineProperty(process, 'resourcesPath', resourcesPathDescriptor);
+  else Reflect.deleteProperty(process, 'resourcesPath');
+});
 
 it.each(['en', 'ja', 'de'] as const)('binds both main-selected names through %s localization', async language => {
   const i18n = await import('../src/renderer/i18n.js');
@@ -66,20 +73,27 @@ it('preserves all twelve upstream locales and 2.1.55 keys without spreading dev 
   }
 });
 
-it.each([false, true])('main selects the packaged=%s name for native About, window and IPC', async packaged => {
+it.each([
+  { packaged: false, override: '', development: true },
+  { packaged: true, override: '', development: false },
+  { packaged: true, override: '1', development: true },
+  { packaged: true, override: '0', development: false }
+])('main selects packaged=$packaged override=$override for native About, window and IPC', async ({ packaged, override, development }) => {
   native.app.isPackaged = packaged;
+  vi.stubEnv('COS_DEV_BRAND', override);
   const otherMenu = { label: 'File' }, quit = { role: 'quit' };
   native.Menu.getApplicationMenu.mockReturnValue({ items: [{ label: 'Electron', submenu: { items: [{ role: 'about' }, quit] } }, otherMenu] });
-  const { appBrand, refreshNativeBrand } = await import('../src/main/app-brand.js');
-  const displayName = packaged ? 'Chat On Venice' : name;
-  expect(appBrand).toEqual({ development: !packaged, displayName });
+  const { appBrand, appBrandAssetPath, refreshNativeBrand } = await import('../src/main/app-brand.js');
+  const displayName = development ? name : 'Chat On Venice';
+  expect(appBrand).toEqual({ development, displayName });
+  expect(appBrandAssetPath('icons/trayTemplate.png')).toBe(packaged ? '/resources/icons/trayTemplate.png' : '/app/build/icons/trayTemplate.png');
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
   refreshNativeBrand(window as never);
   expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55',
-    ...(!packaged ? {iconPath: '/app/artwork/app-icon-source.png'} : {}) });
+    ...(development ? {iconPath: packaged ? '/resources/runtime-icon.png' : '/app/build/runtime-icon.png'} : {}) });
   expect(window.setTitle).toHaveBeenCalledWith(displayName);
   expect(native.app.setName).not.toHaveBeenCalled();
-  if (!packaged && process.platform === 'darwin') {
+  if (development && process.platform === 'darwin') {
     expect(native.Menu.setApplicationMenu).toHaveBeenCalledWith({ items: [
       { label: 'Electron', submenu: { items: [{ role: 'about', label: 'About Chat On Venice (dev)' }, quit] } }, otherMenu
     ] });
@@ -103,18 +117,32 @@ it('logs real before/after userData and the native tooltip getter capability', (
 
 it('loads the generated dedicated macOS tray file and marks the NativeImage as a template', () => {
   const source = read('src/main/index.ts');
-  const image = { setTemplateImage: vi.fn() };
-  const createFromPath = vi.fn(() => image);
+  const image = { setTemplateImage: vi.fn(), addRepresentation: vi.fn() };
+  const createFromBuffer = vi.fn(() => image);
+  const one = Buffer.from('one'), two = Buffer.from('two');
+  const readFileSync = vi.fn((file: string) => file.endsWith('@2x.png') ? two : one);
   const trayFunction = source.slice(source.indexOf('function trayIcon('), source.indexOf('\nfunction refreshTray('));
   const script = transformSync(trayFunction, { loader: 'ts' }).code;
   expect(vm.runInNewContext(`${script}\ntrayIcon(false)`, {
     appBrand: { development: true }, process: { platform: 'darwin' }, path,
-    app: { getAppPath: () => '/checkout' }, nativeImage: { createFromPath }
+    appBrandAssetPath: (name: string) => path.join('/checkout/build', name), readFileSync, nativeImage: { createFromBuffer }
   })).toBe(image);
-  expect(createFromPath).toHaveBeenCalledWith('/checkout/artwork/trayTemplate.png');
+  expect(readFileSync.mock.calls.map(([file]) => file)).toEqual(['/checkout/build/icons/trayTemplate.png', '/checkout/build/icons/trayTemplate@2x.png']);
+  expect(createFromBuffer).toHaveBeenCalledWith(one, { scaleFactor: 1 });
+  expect(image.addRepresentation).toHaveBeenCalledWith({ scaleFactor: 2, dataURL: `data:image/png;base64,${two.toString('base64')}` });
   expect(image.setTemplateImage).toHaveBeenCalledWith(true);
   expect(source).toContain('tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform())');
   expect(source).toContain('template=${initialTrayImage.isTemplateImage()}');
+});
+
+it('packages the canonical tray assets and prepares them for the existing dev entry point', () => {
+  const builder = loadYaml(read('electron-builder.yml')) as { extraResources: unknown[] };
+  expect(builder.extraResources).toContainEqual({ from: 'build/icons', to: 'icons', filter: ['trayTemplate.png', 'trayTemplate@2x.png'] });
+  expect(builder.extraResources).toContainEqual({ from: 'build/runtime-icon.png', to: 'runtime-icon.png' });
+  const pkg = JSON.parse(read('package.json'));
+  expect(pkg.scripts.predev).toBe('npm run icon');
+  expect(pkg.scripts.prebuild).toBe('npm run icon');
+  expect(read('scripts/package.mjs')).toContain("run(node, ['scripts/make-icon.mjs'])");
 });
 
 it('keeps profile/package identities independent of display branding', () => {

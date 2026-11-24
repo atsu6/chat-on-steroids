@@ -1942,3 +1942,82 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 ### 次に確認したいこと
 
 - 次の機能作業は既存のprogressキューに従う。今回の変更はトレイ・回帰テスト・確認記録に限定した。
+
+## 2026-11-24 — パッケージのトレイ資産を統合（実機表示確認は保留）
+
+### 分かったこと
+
+#### 1–2. 収録対象と正・派生
+
+- 元の`electron-builder.yml`の`files`は`out/**`と`package.json`等で、
+  `artwork/trayTemplate.png` / `trayTemplate@2x.png`は含まれていなかった。
+  実読込用の正を`build/icons/trayTemplate.png` / `trayTemplate@2x.png`へ移し、
+  読まれない`artwork`側の2ファイルと、そのディレクトリへの生成を削除した。
+- native画像は`extraResources`で実ファイルとして収録する。
+  `build/icons`から2ファイルだけを`Contents/Resources/icons`へコピーし、
+  Dock/Aboutの`build/runtime-icon.png`は`Contents/Resources/runtime-icon.png`へコピーする。
+  Linuxが既に使っていたruntime-iconの収録先も維持した。
+- `appBrandAssetPath()`が、checkoutでは`<appRoot>/build`、パッケージ版では
+  `process.resourcesPath`を選ぶ。トレイはその`icons/trayTemplate.png`と`icons/trayTemplate@2x.png`を読み、
+  1x/2xのPNG表現を明示して`setTemplateImage(true)`を設定する。
+  final artifactの`app.asar`内にはartwork版やbuild/icons版の重複はない。
+- `ferro-template*.png`は確認専用の派生。16/32pxは実読込用と同じエンコード済みバイトから生成し、
+  その他のサイズも同じmask関数から生成する。回帰テストは正と派生のバイト一致と、artwork版を生成しないことを確認する。
+  `npm run dev` / `npm run build`には`predev` / `prebuild: npm run icon`を追加し、既存の起動・build方法だけで資産が揃うようにした。
+  packageスクリプトも同じgeneratorを使う。
+- final artifactの実収録を確認した。`trayTemplate.png`は16×16、`trayTemplate@2x.png`は32×32、
+  runtime-iconは256×256。根拠は`outputs/packaged-ferro-validation/effective-assets.json`。
+
+#### 3. パッケージ実行の確認と未達
+
+- `scripts/package.mjs --platform darwin --arch arm64 --dir`で実物を生成し、
+  `release/mac-arm64/Chat On Steroids.app`を隔離profileで起動した。
+  最終packageの内部build、ad-hoc封印、既存native runtime smokeは成功した。
+  根拠は`outputs/packaged-ferro-validation/package-delivery.log` / `package-delivery.exit`。
+- mainのdev判定を`!app.isPackaged || process.env.COS_DEV_BRAND === '1'`へ拡張した。
+  通常パッケージはprodのまま。今回のパッケージ確認は`COS_DEV_BRAND=1`を明示した。
+  productName / appId / userDataの識別子は変更していない。
+- 実パッケージのログで`packaged=true`、userDataの前後一致、
+  `Contents/Resources/icons/trayTemplate.png`の読込、`template=true`、16×16を確認した。
+  tooltipのsetterへ渡した文字列は正確に`Chat On Venice (dev)`だった。
+  NativeImageの実デコードでも非透明画素73個を確認し、空画像ではなかった。
+  ウィンドウのAXタイトルとrenderer URLも、この実パッケージの`Chat On Venice (dev)`だった。
+- **ferroとtooltipの実メニューバーでの目視は未達。項目3を保留とする。**
+  ライト・ダーク両方で確認したが、アイコンを可視表示できなかった。
+  メニューバー項目の一時非表示、表示許可の再確認、通常版の一時終了、
+  ユーザー承認済みのSystemUIServer / ControlCenter再起動後にも確認した。
+  パッケージ内で同じPNGを使って作った診断用の最小Trayでも表示を確認できず、
+  画像の収録漏れや空画像とは別の問題が残る。原因は未特定で、OS不具合とは断定していない。
+  GUIDを変える切り分けでも改善せず、その変更は採用していない。
+- 診断用Trayと検証用パッケージのプロセスは終了した。
+  ユーザー指定どおり通常版を再起動し、8765の`/hello`でversion 2.1.55 / bridge 15 / paired:trueを確認した。
+  開発アプリも従来の8766 / 専用runtimeへ戻し、paired:trueを確認した。
+  一時変更した13個のメニューバー項目、背景表示、透明度設定、外観は元へ戻した。
+  Mac全体の再起動は行っていない。
+
+#### 4. 全体テスト1回
+
+- アセット配線・dev判定・native画像読込を反映したソースで、Node 22.23.5の全体`npm test`を1回実行し、終了コード0。
+  **テスト：12,858 passed / 0 failed / 218 skipped。ファイル：525 passed / 0 failed / 20 skipped。**
+  根拠は`outputs/packaged-ferro-validation/full-test.log` / `full-test.exit`。
+  最終typecheckも成功した。既存テストの削除・skip追加はない。
+  その後、通常のbuild入口にも資産生成を補完し、対象テストと`npm run build`で確認した。
+
+#### 5. 素のv2.1.55で確認した既知のflake
+
+- 素の`v2.1.55`の全体実行で`renderer-timeline.part1.test.ts`の
+  `keeps the prior transcript inert until the selected detail arrives and fences A to B to A (immediate traces)`
+  が1 failedになった。該当ファイルの単独実行は111 passed / 0 failed / 0 skippedで再現しなかったため、
+  **既知のflakeとして記録する**。テストとassertは変更していない。
+  根拠は前節の`outputs/tray-template-validation/upstream-tests.log` / `upstream-timeline-isolated.log`。
+
+### 不明なこと・残作業
+
+- 項目3の実機表示を妨げる原因。パッケージの収録・読込と空でないことまでは確認済みだが、
+  ferroとtooltipの両テーマでの目視確認は完了していない。
+
+### 次に確認したいこと
+
+- 担当はCodex。パッケージ版のNSStatusItemを実メニューバーへ表示できる状態にし、
+  同じartifactのferroとtooltipをライト・ダークの両方で確認する。
+  Mac再起動など、承認済みの管理プロセス再起動を超える介入は別途ユーザー承認を得てから行う。

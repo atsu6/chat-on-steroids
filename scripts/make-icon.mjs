@@ -403,11 +403,13 @@ function trayTemplate(size) {
   }
   return pixels;
 }
+// Runtime files are authoritative. Review copies derive from these exact encoded bytes.
+const templates = new Map(REVIEW_SIZES.map(size => [size, encodePng(size, trayTemplate(size))]));
+for (const [size, filename] of [[16, 'trayTemplate.png'], [32, 'trayTemplate@2x.png']]) {
+  writeFileSync(path.join(reviewDir, filename), templates.get(size));
+}
 for (const size of REVIEW_SIZES) {
   writeFileSync(path.join(reviewDir, `icon${size}.png`), pngFor(size));
-  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), encodePng(size, trayTemplate(size)));
+  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), templates.get(size));
 }
-for (const [size, filename] of [[16, 'trayTemplate.png'], [32, 'trayTemplate@2x.png']]) {
-  writeFileSync(path.join(root, 'artwork', filename), encodePng(size, trayTemplate(size)));
-}
-console.log(`Wrote build/icons/icon{${REVIEW_SIZES.join(',')}}.png, ferro-template variants and artwork/trayTemplate{,@2x}.png`);
+console.log(`Wrote build/icons/icon{${REVIEW_SIZES.join(',')}}.png, ferro-template review variants and build/icons/trayTemplate{,@2x}.png`);

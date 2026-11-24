@@ -22,7 +22,7 @@ it('generates every review size, Retina tray templates and all existing icon out
   const ico = readFileSync(path.join(root, 'build/icon.ico'));
   expect(ico.readUInt16LE(4)).toBe(6);
   for (const file of ['build/icon.png', 'build/icon-preview.png', 'build/runtime-icon.png', 'build/installerHeader.bmp',
-    'build/installerSidebar.bmp', 'artwork/trayTemplate.png', 'artwork/trayTemplate@2x.png',
+    'build/installerSidebar.bmp', 'build/icons/trayTemplate.png', 'build/icons/trayTemplate@2x.png',
     ...[16, 32, 48, 128].map(size => `extension/icons/icon${size}.png`)]) expect(existsSync(path.join(root, file)), file).toBe(true);
   for (const [file, width, height] of [['installerHeader.bmp', 150, 57], ['installerSidebar.bmp', 164, 314]] as const) {
     const bmp = readFileSync(path.join(root, 'build', file));
@@ -34,7 +34,9 @@ it('generates every review size, Retina tray templates and all existing icon out
   // The generated source is RGBA/filter-0: template pixels must be black or transparent,
   // not a teal tile masquerading as a macOS template image.
   for (const size of [16, 32]) {
-    const png = readFileSync(path.join(root, `artwork/trayTemplate${size === 32 ? '@2x' : ''}.png`));
+    const png = readFileSync(path.join(root, `build/icons/trayTemplate${size === 32 ? '@2x' : ''}.png`));
+    expect(readFileSync(path.join(root, `build/icons/ferro-template${size}.png`))).toEqual(png);
+    expect(existsSync(path.join(root, `artwork/trayTemplate${size === 32 ? '@2x' : ''}.png`))).toBe(false);
     const chunks: Buffer[] = [];
     for (let offset = 8; offset < png.length;) {
       const length = png.readUInt32BE(offset);
