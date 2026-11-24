@@ -4036,5 +4036,7 @@
   "Also allow running commands": "コマンドの実行も許可する",
   "Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。",
   "コマンドの実行も許可する": "コマンドの実行も許可する",
-  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。"
+  "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。",
+  "File reading and search (core/read, core/find)": "ファイルの読み取りと検索（core/read、core/find）",
+  "ファイルの読み取りと検索（core/read、core/find）": "ファイルの読み取りと検索（core/read、core/find）"
 }

@@ -1432,10 +1432,10 @@ export async function resolveIn(
     const live = effectiveCapabilities(getConfig());
     if (host.tool === 'apply_patch' && (!host.write || !(live.create || live.edit || live.move || live.deleteFile))) throw new SandboxError('TOOL_DISABLED: changing files is not permitted.');
     if (host.tool === 'exec_command' && (!host.shell || !live.command)) throw new SandboxError('TOOL_DISABLED: command execution is not permitted.');
-    if ((host.tool === 'read' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
+    if ((host.tool === 'read' || host.tool === 'find' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
     // No implicit managed/user-Skill roots or learned ChatGPT cwd on this surface.
     // The ordinary resolver still owns canonical paths, traversal and symlinks.
-    return resolvePath(host.roots, requested, { ...options, base: options.base ?? (host.tool === 'exec_command' && host.roots[0] ? `/${host.roots[0].name}` : null) });
+    return resolvePath(host.roots, requested, { ...options, base: options.base ?? ((host.tool === 'exec_command' || host.tool === 'find') && host.roots[0] ? `/${host.roots[0].name}` : null) });
   }
   // The user's own Skill folders are served only to read tools, and never become a workspace.
   if (isUserSkillVirtualPath(requested)) {
@@ -1618,12 +1618,13 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
     async invokeHostAdmitted(name, args, origin) {
       // Host admission has an explicit tool allowlist; shell never follows from file permission.
-      if (surface !== 'core' || !['read', 'apply_patch', 'exec_command'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
+      if (surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
       if (name === 'apply_patch' && origin.write !== true) return fail('TOOL_NOT_GRANTED');
       if (name === 'exec_command' && (origin.shell !== true || !origin.exec)) return fail('TOOL_NOT_GRANTED');
-      const reading = name === 'read' || origin.preview === true;
+      if (name === 'find' && origin.read !== true) return fail('TOOL_NOT_GRANTED');
+      const reading = name === 'read' || name === 'find' || origin.preview === true;
       const context: CallContext = {
-        origin: { ...origin, tool: name as 'read' | 'apply_patch' | 'exec_command' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
+        origin: { ...origin, tool: name as 'read' | 'find' | 'apply_patch' | 'exec_command' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
         allowUnattributed: false, evidence: emptyEvidence(), outcome: null,
         publication: { completedAt: null, failed: false },
         caller: { transportKey: `venice:${origin.runId}`, requestId: null,

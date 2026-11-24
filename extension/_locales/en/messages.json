@@ -1281,5 +1281,8 @@
   "venice_patch_full_diff": {"message": "Show full diff"},
   "venice_exec_running": {"message": "Running"},
   "venice_exec_output_omitted": {"message": "Omitted: only the first 64KB of output is shown."},
-  "venice_exec_output_error": {"message": "Could not retrieve output. Use Stop to end this run."}
+  "venice_exec_output_error": {"message": "Could not retrieve output. Use Stop to end this run."},
+  "venice_find_results": {"message": "Search results"},
+  "venice_find_empty": {"message": "No matches"},
+  "venice_find_truncated": {"message": "Truncated: narrow the search or increase max_results."}
 }

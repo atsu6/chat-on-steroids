@@ -3,6 +3,7 @@ const CONTRACT = `あなたは作業用タブのDOMを操作するエージェ�
 {"action":"done","summary":"<完了報告>"}
 利用可能なツール:
 core/read({paths, start_line?, end_line?, max_bytes?}) -> appで許可したroot内のファイルを読む。appのgrantが必要
+core/find({query, path?, mode?, include?, exclude?, case_sensitive?, regex?, max_results?}) -> read権限とcore/findを含むappのgrantが必要。許可root内を検索。既定content・200件（最大500）。matchesのpath/line/textとtruncatedを返す。バイナリは除外
 core/apply_patch({patch}) -> appで書き込みを別途許可したroot内だけを変更。*** Begin Patch / *** Add File: path / +行 / *** Update File: path / *** Move to: path / @@ / -旧行 / +新行 / *** Delete File: path / *** End Patch 形式。shell実行はできない
 core/exec_command({cmd, workdir?, yield_time_ms?, shell?, login?}) -> 独立したshell許可が必要。cwdは許可root内。既定10秒・最大30秒で待ち、processId・exitCode・stdout/stderr出力を返す。出力は64KiBまで。生存processIdは次段階のwrite_stdin用（まだ利用不可）。同時3本まで。Stopでrunのプロセスを終了
 now() -> 現在時刻のISO文字列
@@ -61,6 +62,7 @@ function createAgent(sendViaUi) {
     const requested = options.maxSteps ?? 10;
     if (!Number.isInteger(requested) || requested < 1) throw new TypeError('maxSteps must be a positive integer');
     if (options.onStep !== undefined && typeof options.onStep !== 'function') throw new TypeError('onStep must be a function');
+    if (options.onFindResult !== undefined && typeof options.onFindResult !== 'function') throw new TypeError('onFindResult must be a function');
     if (options.onExecOutput !== undefined && typeof options.onExecOutput !== 'function') throw new TypeError('onExecOutput must be a function');
     if (options.onPatchPreview !== undefined && typeof options.onPatchPreview !== 'function') throw new TypeError('onPatchPreview must be a function');
     if (taskState) throw new Error('タスクは既に実行中です。');
@@ -94,6 +96,7 @@ function createAgent(sendViaUi) {
           previous = await executeTool(lastAction.name, lastAction.args, {onExecOutput: options.onExecOutput && (output => options.onExecOutput({index, output})), onPatchPreview: options.onPatchPreview && (async diff => {
             await options.onPatchPreview({index: steps.length + 1, diff}); checkRunning();
           })});
+          if (lastAction.name === 'core/find' && previous.ok && previous.result?.structuredContent) options.onFindResult?.({index, result: previous.result.structuredContent});
         } catch (error) {
           previous = {ok: false, error: error.message};
         }
@@ -185,6 +188,7 @@ async function callLocalTool(tool, args = {}, beforeApply, onExecOutput) {
 
 const TOOL_REGISTRY = Object.freeze({
   'core/read': args => callLocalTool('read', args),
+  'core/find': args => callLocalTool('find', args),
   'core/apply_patch': (args, beforeApply) => callLocalTool('apply_patch', args, beforeApply),
   'core/exec_command': (args, _beforeApply, onOutput) => callLocalTool('exec_command', args, undefined, onOutput),
   now: () => new Date().toISOString(),
@@ -258,6 +262,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
       return window.__cosVeniceAgent.runTask(message.instruction, {
         maxSteps: message.maxSteps,
         onStep: (step, preview) => postPanel(message.id, 'step', {step, preview}),
+        onFindResult: result => postPanel(message.id, 'find-result', result),
         onExecOutput: event => { if (!state.cancelled) postPanel(message.id, 'exec-output', event); },
         onPatchPreview: preview => new Promise((resolve, reject) => {
           const id = crypto.randomUUID();

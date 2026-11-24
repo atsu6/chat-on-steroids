@@ -1,6 +1,6 @@
 # Venice 移植キュー
 
-0〜4は完了。追加の **4.5: attestation輸送は保留**。5以降は未着手。
+0〜4と6は完了。追加の **4.5: attestation輸送は保留**。5のwrite_stdinと7以降は未着手。
 
 | 状態（番号・項目） | 根拠commit | 残作業 |
 | --- | --- | --- |
@@ -11,7 +11,7 @@
 | 4. exec_command — 完了 | `eba8035a`, `969752ce`, `ab7dd7a8`, `0c3fb4fd` | なし（追加20件成功。全体の失敗と切り分けは下記） |
 | 4.5. attestation輸送 — 保留 | 補助修正のみ `1ee5c67a` | 輸送本体・認証取得・401/403後の自動再送・実fetchのConsole手順は未実装。NUL除去と計画だけの応答への1回再試行のみ完了。詳細は `venice-attestation-status.md` |
 | 5. write_stdin — 未着手 | — | run所有権を使うstdin/poll接続。2.1.55 が出ていれば先にマージする |
-| 6. find — 未着手 | — | 検索接続 |
+| 6. find — 完了 | `72b6daea`, `78d02537` | なし（追加16件、全体 523 passed / 0 failed） |
 | 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
 | 8. 通知 — 未着手 | — | Venice通知の接続・検証 |
 | 9. Desktop AX観測 — 未着手 | — | AX観測・所有者・権限の検証 |
@@ -53,3 +53,20 @@
 - 補助の既存CJS実行は68成功 / 2失敗。2件は直前HEAD `158d68c1` のソースでも再現した
   （初期localDocument通知と、core/readのスラッシュを許容しない既存CONTRACT検査）。既存テストは変更していない。
 - 検証ログ・画像: `outputs/venice-exec/`。実Venice送信は未実施（指定どおり）。次は5のwrite_stdin。
+
+
+## 6の検証状況
+
+- 新しい承認要求はread + findを明示し、同じ読み取り権限で検索する。write / shellは既定OFF。
+  旧read-only grantは変更せず、findの利用には新しい承認を取る。
+- 既存find schema / search guard / ripgrep経路を使い、検索範囲をgrantのcanonical rootsに限定する。
+  Veniceはcontent / 200件を既定とし、最大500件。上限+1件を確認してから返すため、ちょうど200件の完了は打ち切りとしない。
+- path・行番号・抜粋とtruncated / 停止理由を返す。0件、NULを含むbinaryの除外、UTF-16 BOM、symlink脱出拒否を実ファイルで確認した。
+  パネルはtextContentで表示し、NULを空白へ置換、改行と横スクロールを維持する。
+- 追加16テスト成功。read / patch / exec / gateway / 承認の関連テストも成功し、既存テストは変更していない。
+  既存ブラウザ経路のCJS53件も成功。
+- 全体`npm test`は実装とテストを固定して1回実行し、**523 passed / 0 failed / 20 skipped**（ファイル）、
+  **12,829 passed / 0 failed / 218 skipped**（テスト）。`npm run typecheck` / `npm run build`も成功。
+- headlessでread+find承認、write/shell OFF、ja/enのscope、MAIN / ISOLATEDの結果表示、NUL除去、安全な文字列表示、
+  打ち切り、PC/モバイル、横スクロール、axe違反0を確認した。実Venice送信は行っていない。
+  ログと画像は`outputs/venice-find/`。仕様は`venice-integration-plan.md` §14を参照。

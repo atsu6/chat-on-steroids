@@ -35,6 +35,19 @@
       ui.state.textContent = '停止待ち';
       message('現在の処理が終わるのを待っています。');
     }
+    if (data.event === 'find-result') {
+      const out = data.result;
+      if (!Number.isInteger(data.index) || data.index < 1 || data.index > 40 || !out || !Array.isArray(out.matches) || out.matches.length > 500) return;
+      if (!out.matches.every(hit => typeof hit.path === 'string' && (hit.line === undefined || Number.isSafeInteger(hit.line)) && (hit.text === undefined || typeof hit.text === 'string'))) return;
+      const text = out.matches.map(hit => hit.line === undefined ? hit.path : `${hit.path}:${hit.line}: ${hit.text ?? ''}`).join('\n').replace(/\0/g, ' ');
+      if (text.length > 1_000_000) return;
+      const row = document.createElement('li'); row.className = 'find-output';
+      const title = document.createElement('div'); title.textContent = `${String(data.index).padStart(2, '0')} / core/find / ${t('venice_find_results', '検索結果')}: ${out.matches.length}`;
+      const pre = document.createElement('pre'); pre.tabIndex = 0; pre.setAttribute('aria-label', t('venice_find_results', '検索結果'));
+      pre.textContent = text || t('venice_find_empty', '一致なし');
+      const notice = document.createElement('div'); notice.className = 'find-notice'; notice.textContent = out.truncated ? t('venice_find_truncated', '打ち切り：検索範囲を絞るか、max_resultsを増やしてください。') : '';
+      row.append(title, pre, notice); ui.steps.append(row); ui.steps.scrollTop = ui.steps.scrollHeight; return;
+    }
     if (data.event === 'exec-output') {
       const out = data.output;
       if (!Number.isInteger(data.index) || data.index < 1 || data.index > 40 || !out || typeof out.callId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(out.callId)) return;
@@ -131,11 +144,11 @@
         ol { list-style:none; padding:0; margin:12px 0 0; max-height:160px; overflow:auto; border-top:1px solid var(--vp-line); }
         ol:empty { display:none; } li { padding:7px 0; font:13px/1.6 ui-monospace,'SF Mono',monospace; white-space:nowrap; min-width:max-content; }
         li[data-ok=false] { color:var(--vp-red); } li[data-ok=true] { color:var(--vp-green); }
-        ol:has(.patch-preview, .exec-output) { max-height:280px; }
+        ol:has(.patch-preview, .exec-output, .find-output) { max-height:280px; }
         ol:has(details[open]) { max-height:min(400px,45dvh); }
-        li.patch-preview, li.exec-output { white-space:normal; min-width:0; color:var(--vp-ink); }
-        .patch-preview pre, .exec-output pre { margin:8px 0; max-height:280px; overflow:auto; white-space:pre; font:12px/1.6 ui-monospace,'SF Mono',monospace; }
-        .exec-output [data-stream=stderr], .exec-notice { color:var(--vp-red); }
+        li.patch-preview, li.exec-output, li.find-output { white-space:normal; min-width:0; color:var(--vp-ink); }
+        .patch-preview pre, .exec-output pre, .find-output pre { margin:8px 0; max-height:280px; overflow:auto; white-space:pre; font:12px/1.6 ui-monospace,'SF Mono',monospace; }
+        .exec-output [data-stream=stderr], .exec-notice, .find-notice { color:var(--vp-red); }
         .exec-output pre:empty { display:none; }
         .exec-title { overflow-wrap:anywhere; }
         .patch-preview summary { cursor:pointer; min-height:28px; color:var(--vp-muted); }
