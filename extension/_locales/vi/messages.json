@@ -756,7 +756,7 @@
     "message": "Kết nối ChatGPT với Chat On Steroids và điều khiển các tab trình duyệt ở chế độ nền bằng DOM, ảnh chụp màn hình và công cụ dành cho nhà phát triển."
   },
   "extension_name": {
-    "message": "Tiện ích trình duyệt Chat On Steroids"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Nâng cao"

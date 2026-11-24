@@ -756,7 +756,7 @@
     "message": "将 ChatGPT 连接到 Chat On Steroids，并通过 DOM、截图和开发者工具在后台控制浏览器标签页。"
   },
   "extension_name": {
-    "message": "Chat On Steroids 浏览器扩展"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "高级"

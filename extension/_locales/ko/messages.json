@@ -756,7 +756,7 @@
     "message": "ChatGPT를 Chat On Steroids에 연결하고 DOM, 스크린샷, 개발자 도구로 백그라운드에서 브라우저 탭을 제어합니다."
   },
   "extension_name": {
-    "message": "Chat On Steroids 브라우저 확장 프로그램"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "고급"
