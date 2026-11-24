@@ -1276,5 +1276,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
-  }
+  },
+  "venice_patch_preview": {"message": "Änderungen vor dem Anwenden"},
+  "venice_patch_full_diff": {"message": "Vollständigen Diff anzeigen"}
 }

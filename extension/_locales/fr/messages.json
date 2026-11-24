@@ -1327,5 +1327,7 @@
   },
   "content_revival_draft_appeared": {
     "message": "Quelque chose a été saisi dans la conversation pendant la préparation du réveil du worker, donc le réveil ne l’a pas remplacé."
-  }
+  },
+  "venice_patch_preview": {"message": "Différences avant application"},
+  "venice_patch_full_diff": {"message": "Afficher toutes les différences"}
 }

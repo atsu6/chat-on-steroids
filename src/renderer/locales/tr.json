@@ -4113,5 +4113,9 @@
   "許可しない": "İzin verme",
   "このrunだけ許可": "Yalnızca bu çalıştırma için izin ver",
   "未割り当て": "Atanmamış",
-  "承認操作を完了できませんでした。": "Onay işlemi tamamlanamadı."
+  "承認操作を完了できませんでした。": "Onay işlemi tamamlanamadı.",
+  "Also allow writing": "Yazmaya da izin ver",
+  "Allow creating, editing, moving, and deleting files in the selected folders.": "Seçilen klasörlerde dosya oluşturmaya, düzenlemeye, taşımaya ve silmeye izin ver.",
+  "書き込みも許可する": "Yazmaya da izin ver",
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Seçilen klasörlerde dosya oluşturmaya, düzenlemeye, taşımaya ve silmeye izin ver."
 }

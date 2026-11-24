@@ -5798,7 +5798,7 @@ async function handleVeniceBridge(message, sender) {
     return {ok: false, error: 'Venice bridge sender is not authorized'};
   }
   startVeniceGrantLifecycle();
-  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument'].includes(message.op)) {
+  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument', 'previewPatch'].includes(message.op)) {
     if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
     const brain = await chrome.tabs.get(sender.tab.id);
     if (!isVeniceBridgeUrl(brain.url) || brain.pendingUrl) throw new Error('Venice brain tab has navigated away');
@@ -5847,9 +5847,10 @@ async function handleVeniceBridge(message, sender) {
     const runId = (await chrome.storage.session.get(runKey))[runKey];
     if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
     const args = message.args ?? {};
-    if (args.surface !== 'core' || args.tool !== 'read') throw new Error('Only core/read is available');
+    if (args.surface !== 'core' || !['read', 'apply_patch'].includes(args.tool) || (message.op === 'previewPatch' && args.tool !== 'apply_patch')) throw new Error('Only core/read and core/apply_patch are available');
     const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({sender: source,
-      request: {runId, callId: args.callId, surface: 'core', tool: 'read', args: args.args}
+      ...(message.op === 'previewPatch' ? {preview: true} : {}),
+      request: {runId, callId: args.callId, surface: 'core', tool: args.tool, args: args.args}
     })});
     if (!reply.ok) throw new Error(`Venice local tool transport failed: ${reply.data?.error || reply.error || reply.status}`);
     return {ok: true, result: reply.data};

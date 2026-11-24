@@ -4028,5 +4028,9 @@
   "許可しない": "Không cho phép",
   "このrunだけ許可": "Chỉ cho phép lần chạy này",
   "未割り当て": "Chưa được gán",
-  "承認操作を完了できませんでした。": "Không thể hoàn tất thao tác phê duyệt."
+  "承認操作を完了できませんでした。": "Không thể hoàn tất thao tác phê duyệt.",
+  "Also allow writing": "Cho phép cả thao tác ghi",
+  "Allow creating, editing, moving, and deleting files in the selected folders.": "Cho phép tạo, sửa, di chuyển và xóa tệp trong các thư mục đã chọn.",
+  "書き込みも許可する": "Cho phép cả thao tác ghi",
+  "選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。": "Cho phép tạo, sửa, di chuyển và xóa tệp trong các thư mục đã chọn."
 }
