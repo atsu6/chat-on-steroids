@@ -836,7 +836,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = requireVeniceRenderer(event);
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     if (!veniceToolGateway.pendingApprovals().some(row => row.id === id)) throw new Error('venice_approval_unavailable');
-    const chosen = await dialog.showOpenDialog(window, { title: 'フォルダを選ぶ', properties: ['openDirectory', 'multiSelections'] });
+    const chosen = await dialog.showOpenDialog(window, { ...dialogLabel('Choose folders'), properties: ['openDirectory', 'multiSelections'] });
     return chosen.canceled ? veniceToolGateway.pendingApprovals() : veniceToolGateway.chooseApprovalRoots(id, chosen.filePaths);
   });
   handle('venice:grantAnswer', async (payload, event) => {
