@@ -8,6 +8,7 @@ import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.
 import { getConfig, effectiveCapabilities } from '../config.js';
 import { previewVenicePatch } from '../venice-patch-preview.js';
 import { veniceExecResult } from '../venice-exec.js';
+import { findInVeniceRoots } from '../venice-find.js';
 import { createHash } from 'node:crypto';
 import { checkAutomaticSend } from '../send-check.js';
 import { liveConnectorName } from './surfaces.js';
@@ -597,7 +598,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             max_results: z.number().int().min(1).max(500).optional().describe('Default 50.')
           })
           .superRefine((input, ctx) => {
-            if ((input.mode ?? 'name') !== 'content' && input.regex === true) {
+            if ((input.mode ?? (currentCall()?.origin?.type === 'venice' ? 'content' : 'name')) !== 'content' && input.regex === true) {
               ctx.addIssue({
                 code: 'custom',
                 path: ['regex'],
@@ -610,6 +611,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async ({ query, path: p, mode, include, exclude, case_sensitive, regex, max_results }) =>
         reg.guarded('search', 'find', async () => {
+          const host = currentCall()?.origin;
+          if (host?.type === 'venice') return findInVeniceRoots(
+            { query, path: p, mode, include, exclude, case_sensitive, regex, max_results }, ctx.roots,
+            requested => resolveIn(ctx.roots, requested, { access: 'read' }), host.current
+          );
           const limit = Math.min(500, Math.max(1, Math.floor(max_results ?? 50)));
           const deadline = Date.now() + 10_000;
           const scopes: Array<{ real: string; virtual: string; server?: ProjectFs }> = [];

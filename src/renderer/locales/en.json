@@ -4108,5 +4108,7 @@
   "{0} unchanged lines|one": "{0} unchanged line",
   "Estimated cost per day, last {0} days|one": "Estimated cost per day, last {0} day",
   "{0} expected files|one": "{0} expected file",
-  "{0} steps waiting for you|one": "{0} step waiting for you"
+  "{0} steps waiting for you|one": "{0} step waiting for you",
+  "File reading and search (core/read, core/find)": "File reading and search (core/read, core/find)",
+  "ファイルの読み取りと検索（core/read、core/find）": "File reading and search (core/read, core/find)"
 }

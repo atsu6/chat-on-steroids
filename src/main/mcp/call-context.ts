@@ -81,11 +81,12 @@ export interface CallCaller {
 /** Created only by the app's grant owner, never deserialised from a wire request. */
 export interface HostAdmittedOrigin {
   type: 'venice';
+  read?: boolean;
   write?: boolean;
   preview?: boolean;
   shell?: boolean;
   exec?: import('../venice-exec.js').VeniceExecLease;
-  tool?: 'read' | 'apply_patch' | 'exec_command';
+  tool?: 'read' | 'find' | 'apply_patch' | 'exec_command';
   runId: string;
   sessionId: string;
   roots: Root[];
