@@ -232,7 +232,14 @@ async function loadPty(): Promise<PtyModule | null> {
 
 // --------------------------------------------------------------------------- process
 
+/** Optional host observer; ordinary Codex output collection and custody are unchanged. */
+export interface ExecProcessObserver {
+  onOutput?(stream: 'stdout' | 'stderr', chunk: Buffer): void;
+  onSpawn?(control: { completion: Promise<ProcessCompletion>; terminate(): Promise<void> }): void;
+}
+
 export interface SpawnParams {
+  observer?: ExecProcessObserver;
   batchMarker?: string;
   /** The derived argv; element 0 is the executable. */
   command: string[];
@@ -364,11 +371,12 @@ class UnifiedExecProcess {
       }
       const managed = new UnifiedExecProcess(true, handle.pid, params.batchMarker);
       managed.pty = handle;
-      handle.onData((data) => managed.pushChunk(Buffer.from(data, 'utf8')));
+      handle.onData((data) => { const chunk = Buffer.from(data, 'utf8'); params.observer?.onOutput?.('stdout', chunk); managed.pushChunk(chunk); });
       handle.onExit((event) => {
         managed.signalExit(event.exitCode);
         managed.closeOutput();
       });
+      managed.observe(params.observer);
       await managed.waitForEarlyExit();
       return managed;
     }
@@ -398,10 +406,10 @@ class UnifiedExecProcess {
     managed.child = child;
     // stdout and stderr are combined into one stream, exactly as `combine_output_receivers`
     // does on the local Codex path, so interleaving is preserved in arrival order.
-    for (const stream of [child.stdout, child.stderr]) {
+    for (const [name, stream] of [['stdout', child.stdout], ['stderr', child.stderr]] as const) {
       if (!stream) continue;
       managed.openStreams += 1;
-      stream.on('data', (chunk: Buffer) => managed.pushChunk(chunk));
+      stream.on('data', (chunk: Buffer) => { params.observer?.onOutput?.(name, chunk); managed.pushChunk(chunk); });
       stream.on('end', () => managed.streamEnded());
       stream.on('error', () => managed.streamEnded());
     }
@@ -420,6 +428,7 @@ class UnifiedExecProcess {
       managed.signalExit(code === null && signal ? null : code);
     });
 
+    managed.observe(params.observer);
     await managed.waitForEarlyExit();
     // Node reports an OS-level spawn failure (for example ENOENT for a missing
     // executable) through the ChildProcess `error` event instead of throwing
@@ -449,6 +458,16 @@ class UnifiedExecProcess {
   watch(listener: (chunk: Buffer) => void): () => void { this.watchers.add(listener); return () => { this.watchers.delete(listener); }; }
   /** The output so far, as retained for completed results (head and tail, with a marker where bytes were left out). */
   historyBytes(): Buffer { return this.history.toBytesWithOmissionMarker(); }
+
+  private observe(observer: ExecProcessObserver | undefined): void {
+    observer?.onSpawn?.({ terminate: () => this.terminate(), completion: this.completion.then(async completion => {
+      if (!this.outputClosed) {
+        const closed = this.outputClosedNotify.notified();
+        try { await raceWithTimeout([closed], POST_EXIT_CLOSE_WAIT_CAP_MS); } finally { closed.dispose(); }
+      }
+      return completion;
+    }) });
+  }
 
   private pushChunk(chunk: Buffer): void {
     if (chunk.length === 0) return;
@@ -679,6 +698,7 @@ export function execCommandStructuredOutput(output: ExecCommandToolOutput): Reco
 // --------------------------------------------------------------------------- manager
 
 export interface ExecCommandRequest {
+  observer?: ExecProcessObserver;
   classifyExit?: (exitCode: number | null, rawOutput: string) => boolean;
   batchMarker?: string;
   command: string[];
@@ -829,6 +849,7 @@ export class UnifiedExecProcessManager {
         request.shellType === 'powershell' ? withPowershellExitStatus(prefixPowershellScriptWithUtf8(request.command)) : request.command;
       process = await UnifiedExecProcess.spawn({
         batchMarker: request.batchMarker,
+        observer: request.observer,
         command,
         shellType: request.shellType,
         cwd: request.cwd,
