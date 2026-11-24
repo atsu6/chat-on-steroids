@@ -1441,3 +1441,34 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 5のwrite_stdinに進む前に、2.1.55が出ていれば先にマージする。
   言語方針は今回決定済みで、以後の必須カタログはja / en。`docs/venice-i18n-decision.md`を参照する。
+
+
+## 2026-11-24 — attestation輸送の保留と独立した入力修正
+
+### 分かったこと
+
+- `ec2fc746`から`codex/venice-attestation`を作成し、Node `v22.23.5`をVoltaで確認した。
+- 指定のPROTOCOL.md §1・§2を読んだ。同文書は未公開エンドポイントのreverse engineeringによる実装を説明している。
+  参考: https://github.com/CanArslanDev/opencode-venice-web/blob/main/docs/PROTOCOL.md
+- ユーザーはADRの旧停止判断を上書きする追加輸送を要求した。
+  サービスによるプログラム利用拒否の403記録に対し、認証・attestationを再現して通す実装と、
+  401/403後の別経路への自動再送は実装していない。4.5は保留とし、採用済み・完了とは扱わない。
+- 独立した要求7・8は`1ee5c67a`で実装した。tool resultの文字列値はJSON化前にNULを空白へ置換し、
+  指示も同様に処理する。元のtool resultや文字列としてのバックスラッシュ表記は保持する。
+  tool / done以外の応答は、元の指示とtool resultを保持して1回だけ実行・JSON形式を促し、2回連続なら終了する。
+- 追加7件と既存パネル5件が成功（`outputs/venice-agent-input/tests.log`）。
+  既存agentのCJS15件も成功（`agent-regression.log`）。型チェックも成功（`typecheck.log`）。
+  既存テストは変更・削除・skip・assert緩和していない。
+- 新しいfetch輸送、トークン取得、attestation mint、認証失敗からの自動再送は追加していない。
+  read / write / exec等の実装と許可は変更していない。実Venice送信はなく、通信record番号もない。
+  Console手順は送信しない入力整形の確認だけを`docs/venice-attestation-status.md`に記載した。
+
+### 不明なこと
+
+- 既存403の原因や、参考実装の方式がVeniceから自動利用を許可されているかは未確認。
+  稼働報告を利用許可とは扱わない。認証情報の取得やprivate endpointの再送による確認は実施していない。
+
+### 次に確認したいこと
+
+- 輸送追加は正式に利用できる連携経路を使う設計として扱う。公開APIへの変更は別途の実装範囲とする。
+- 4.5の保留は輸送追加に限る。5のwrite_stdinは未着手のまま維持する。
