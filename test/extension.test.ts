@@ -102,15 +102,11 @@ describe('extension release metadata', () => {
   });
 
   /**
-   * The Fiber helper reads ChatGPT's own JavaScript context only because the manifest
-   * says `"world": "MAIN"`.
-   * Lose that one word and the file still loads, still finds nothing — `__reactFiber$` is
-   * invisible from an isolated world — and fails closed, so every collapsed row silently
-   * goes back to standing for one call. That is a regression with no symptom, which is
-   * why it is pinned here. ChatGPT's two readers and Venice's raw trace must also stay
-   * confined to their respective hosts rather than sharing a cross-provider entry.
+   * The development companion must not double-hook ChatGPT alongside the normal CoS
+   * extension. Only Venice gets automatic scripts; its passive trace stays in MAIN,
+   * while the bridge and panel remain isolated from page JavaScript.
    */
-  it('scopes the two ChatGPT MAIN readers and one Venice MAIN trace to their own hosts', async () => {
+  it('injects only on Venice and keeps its MAIN trace separate from isolated bridge code', async () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'extension', 'manifest.json'), 'utf8')
     ) as { content_scripts: Array<{ matches: string[]; js: string[]; world?: string }> };
@@ -118,15 +114,15 @@ describe('extension release metadata', () => {
     const main = manifest.content_scripts
       .filter((entry) => entry.world === 'MAIN')
       .map(({ matches, js, world }) => ({ matches, js, world }));
-    expect(main).toHaveLength(3);
-
-    const chatgptMatches = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
-    const chatgpt = main.filter((entry) => entry.matches.includes('https://chatgpt.com/*'));
-    expect(chatgpt).toHaveLength(2);
-    expect(chatgpt).toEqual(expect.arrayContaining([
-      { matches: chatgptMatches, js: ['fiber.js'], world: 'MAIN' },
-      { matches: chatgptMatches, js: ['usage.js'], world: 'MAIN' }
-    ]));
+    expect(main).toHaveLength(1);
+    expect(manifest.content_scripts).toHaveLength(3);
+    for (const entry of manifest.content_scripts) {
+      expect(entry.matches).toEqual(['https://venice.ai/*']);
+      expect(entry.js.length).toBeGreaterThan(0);
+      for (const script of ['fiber.js', 'chatgpt-dom.js', 'app-palette.js', 'content.js']) {
+        expect(entry.js).not.toContain(script);
+      }
+    }
 
     const venice = main.filter((entry) => entry.matches.includes('https://venice.ai/*'));
     expect(venice).toEqual([
