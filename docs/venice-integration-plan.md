@@ -10,10 +10,10 @@ readの承認UIを実装し、パネルからのgrant要求・ネイティブフ
 
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
-現在のbridgeはgrant付き `core/read`、独立したwrite同意を要する `core/apply_patch`（§12）、
+現在のbridgeはgrant付き `core/read` と `core/find`（§14）、独立したwrite同意を要する `core/apply_patch`（§12）、
 独立したshell同意を要する `core/exec_command`（§13）を受ける。Desktopは公開しない。
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
-初回のread接続は§10–11、apply_patch接続は§12、今回のexec接続は§13。以降のキューは `venice-progress.md` を参照する。
+初回のread接続は§10–11、apply_patch接続は§12、exec接続は§13、今回のfind接続は§14。以降のキューは `venice-progress.md` を参照する。
 
 ## 1. agent map の要約（8行）
 
@@ -593,3 +593,40 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 `test/venice-exec-ui.test.ts`は承認状態と全カタログ、`test/venice-exec-panel.test.ts`はMAIN / ISOLATEDの合成経路を使う。
 `node test/venice-exec.visual.cjs`はネットワークを全てローカル応答/abortにして、既存CSS / i18nの承認画面、
 分離出力、改行、横スクロール、省略、完了後の継続観測、Stop、日本語/ドイツ語、PC/モバイル、axeを確認する。
+
+
+## 14. core/find（2026-11-24 実装）
+
+新しいパネルからrunを開始して読み取りを許可すると、同じroot内を検索できる。
+既存runの許可を自動で広げないため、旧read-only grantでfindを使う場合は新しい承認を取る。
+書き込み・shellのチェックは不要で、既定OFFのままにする。
+
+- 新しい承認要求は`tools: ['core/read', 'core/find']`。従来の`['core/read']`も受け付け、旧grantのtool配列は変えない。
+  appの承認画面は新しい要求に「ファイルの読み取りと検索（core/read、core/find）」を表示する。
+  `core/find`とreadの両方がappの許可リストにあり、現在のread / search capabilityが有効な場合だけhost_admittedで実行する。
+- 既存find handlerのschemaとsearch guardを使い、Veniceのregistrarだけ`exposedFind: true`にする。
+  通常CoSでfindとexecが排他的になる既存の登録条件・動作は変えない。
+  `src/main/venice-find.ts`は既存の`search()` / `searchOneFile()`を呼ぶVenice専用の結果整形で、検索engine自体は変更しない。
+- 引数は既存どおり`query`, `path?`, `mode?`, `include?`, `exclude?`, `case_sensitive?`, `regex?`, `max_results?`。
+  Veniceは`mode: 'content'`、`max_results: 200`を既定とし、上限は既存schemaの500。
+  通常CoSの既定name / 50件は維持する。contentは既存のripgrep経路を使用し、runtime不在時は明示エラーにする。
+- path省略時はgrantの全root、相対pathはgrant先頭rootが基準。virtual / nativeの明示pathも既存resolverで検証し、
+  root外・traversal・外向きsymlinkを拒否する。配下走査でsymlinkを追わない既存searchの動作を使う。
+  デフォルト除外・include / exclude・大文字小文字・regexも既存実装に従う。
+- ユーザーの上限より1件多くまで取得してから切り詰める。200件ちょうどで探索終了ならtruncated:false、
+  201件以上なら200件とtruncated:trueを返す。複数rootで全体上限と10秒のdeadlineを共有する。
+- `structuredContent`は`matches: [{path, line?, text?}]`, `count`, `limit`, `truncated`, `stoppedBecause`, `binaryPolicy`。
+  contentのlineは1始まり、textは既存searchの最大300文字の抜粋。nameモードではpathだけを返す。
+  件数・時間・ファイルサイズ等で探索を打ち切ったときは理由を含める。0件も空のmatchesとして返す。
+- contentでbinaryを除外する。明示ファイルは既存の先頭8KiBのbinary判定を併用し、UTF-16 BOM付きテキストは検索する。
+  これはripgrepが明示binaryファイルから部分的なmatchを返すケースを避けるため。
+  `binaryPolicy`はcontentなら`skip`、nameなら`names-only`。NULは出力時に空白へ置換する。
+- 結果は既存secrets shieldとcallId台帳を通す。失効後の新規検索は拒否し、検索中に失効した場合も結果は渡さない。
+  完了済みcallIdの再取得は元の認証済み所有者だけが行い、検索を実行し直さない。
+- MAIN / ISOLATEDを通してパネルのステップ欄へpath・行番号・抜粋をtextContentで表示する。
+  preは改行を保ち、長い行を折らず横スクロールできる。0件と打ち切りを明示し、preはキーボードでも操作できる。
+  新しい表示文言は方針どおりja / enだけを必須カタログとして登録した。
+
+検証は実ファイルとripgrep、実kernel / gateway / 認証HTTPに加え、合成モデル応答のパネル経路を使う。
+`node test/venice-find.visual.cjs`で既存承認UIとパネルをheadless Chromeで確認し、外部通信は全てローカル応答またはabortにする。
+実Venice送信は行わない。根拠commit・検証結果はprogressとfindingsに記録する。

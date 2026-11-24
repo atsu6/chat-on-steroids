@@ -1472,3 +1472,53 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 
 - 輸送追加は正式に利用できる連携経路を使う設計として扱う。公開APIへの変更は別途の実装範囲とする。
 - 4.5の保留は輸送追加に限る。5のwrite_stdinは未着手のまま維持する。
+
+
+## 2026-11-24 — core/findのread権限接続と結果表示
+
+### 分かったこと
+
+- `795216fb`を基点に`codex/venice-find`で実装した。NodeはVoltaの`v22.23.5`。
+  根拠commitは`72b6daea`（gateway / kernel / 検索結果）と`78d02537`（承認・パネル・追加検証）。
+- 新しいパネルは`tools: ['core/read', 'core/find']`を要求し、appに読み取りと検索を明示する。
+  旧`['core/read']`の要求・grantは引き続き受け付け、旧grantへfindを自動追加しない。
+  findの実行にはreadとfindの両方が必要。write / shellの同意は不要で、既定OFFを保つ。
+- Veniceのregistrarだけfindを明示的に登録し、既存find handlerのschema / search guardから既存search engineを呼ぶ。
+  通常CoSでのfind / execの排他、name / 50件の既定、既存read / write / execの契約は変えていない。
+  検索engine本体の`search.ts`も変更していない。
+- Veniceのcontent検索はripgrepを使う。query / path等は既存の引数を使い、既定content / 200件、最大500件。
+  path省略時はgrantの全root、相対pathは先頭rootを使い、全てのpathを既存resolverで検証する。
+  別のglobally approved root、native path、traversal、外向きsymlinkは拒否し、配下の外向きlinkも走査しない。
+- 上限+1件まで取得してから返す件数を制限する。実ファイルで200件ちょうどならtruncated:false、
+  201件なら200件 / truncated:trueとなることを確認した。
+  結果はmatches内のpath / line / text、count / limit / truncated / stoppedBecause / binaryPolicy。
+  contentの抜粋は既存searchの最大300文字。明示nameモードはpathだけを返す。
+- 明示binaryファイルにripgrepを使うと、NUL直前までの部分的なmatchが返る場合があることを実測した。
+  Veniceの明示ファイル検索では既存の先頭8KiBのbinary判定を併用し、binaryを検索対象から除外する。
+  UTF-16 BOM付きテキストはbinary扱いにせず、行番号とdecoded textを返す。
+  nameモードではbinaryファイルの名前も対象にするためbinaryPolicyはnames-onlyとする。
+- 出力NULは空白へ置換する。結果は既存のsecrets shield・host_admitted記録・callId台帳を通す。
+  失効後の新規検索は拒否し、処理中に失効した結果も渡さない。再取得で検索を実行し直さない。
+- パネルは結果をtextContentでまとめて描画する。改行・横スクロール・キーボード操作を保ち、0件と打ち切りを表示する。
+  新しい承認scopeと出力ラベルは現在の方針どおりja / enへ登録した。
+- 追加16件が全て成功（`outputs/venice-find/added-tests.log`）。実kernel / gateway / 認証HTTP、
+  一時フォルダーと実ripgrepで権限拒否、root外、通常ヒット、0件、上限、NUL / binary / UTF-16、
+  read-onlyでcommand無効、callId再取得、revoke、secrets shieldを確認した。既存テストは変更・削除・skip・緩和していない。
+  既存ブラウザのCJS53件も成功（`browser-regression.log`）。
+- 全体`npm test`は実装とテストを固定して1回実行し、終了コード0。
+  **523 passed / 0 failed / 20 skipped**（ファイル）、**12,829 passed / 0 failed / 218 skipped**（テスト）。
+  `npm run typecheck` / `npm run build`も終了コード0。根拠は同フォルダーの`full-test.log` / `full-test.exit` / `typecheck.log` / `build.log`。
+- `node test/venice-find.visual.cjs`はheadless Chromeで成功。既存の承認UIとMAIN / ISOLATEDを実行し、
+  read+findの明示、write / shell OFF、ja/enの表示、path / 行 / 抜粋、安全な文字列、NUL除去、打ち切り、
+  横スクロール、PC / モバイル、axe違反0・pageerror 0を確認した。画像は`outputs/venice-find/`。
+  ブラウザ通信はローカル合成応答またはabortで、実Venice送信recordはない。
+
+### 不明なこと
+
+- 実Veniceモデルがcore/findを選んで検索結果を利用する動作は未検証。モデル応答は合成値を使用した。
+- private endpoint 403やattestation等の未解明事項は今回調査しておらず、4.5の保留を変更しない。
+
+### 次に確認したいこと
+
+- 残キューの5：write_stdin。execのrun所有者とprocessIdを使って継続を接続する。
+  2.1.55が出ていれば先にマージする。7の履歴UIは引き続き未着手。
