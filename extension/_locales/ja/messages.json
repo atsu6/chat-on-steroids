@@ -1233,5 +1233,6 @@
   "venice_exec_output_error": {"message": "出力を取得できませんでした。停止ボタンでrunを終了できます。"},
   "venice_find_results": {"message": "検索結果"},
   "venice_find_empty": {"message": "一致なし"},
-  "venice_find_truncated": {"message": "打ち切り：検索範囲を絞るか、max_resultsを増やしてください。"}
+  "venice_find_truncated": {"message": "打ち切り：検索範囲を絞るか、max_resultsを増やしてください。"},
+  "venice_chatgpt_migration_warning": { "message": "このVeniceビルドは移行途中です。ChatGPTへの再注入を停止しました。既存のフックを除くにはChatGPTページを再読み込みし、通常版CoS拡張を使ってください。" }
 }

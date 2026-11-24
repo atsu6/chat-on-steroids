@@ -6583,8 +6583,28 @@ async function reloadErrorPage(id) {
   } catch { await saveErrorPageReloads(); /* The tab went away; nothing to reload. */ }
 }
 
+let veniceChatgptWarningShown = false;
+function blockVeniceChatgptInjection() {
+  // The manifest owns the build's hosts; recovery must not undo its Venice-only static scope.
+  const matches = (chrome.runtime.getManifest().content_scripts ?? []).flatMap(entry => entry.matches);
+  if (!matches.includes('https://venice.ai/*') || matches.some(url => CHATGPT_TAB_URLS.includes(url))) return false;
+  if (!veniceChatgptWarningShown) {
+    veniceChatgptWarningShown = true;
+    void globalThis.CLF_I18N.ready.then(() => {
+      const warning = globalThis.CLF_I18N.t('venice_chatgpt_migration_warning');
+      console.warn(warning);
+      return Promise.all([
+        chrome.action.setBadgeText({ text: '!' }),
+        chrome.action.setTitle({ title: warning })
+      ]);
+    }).catch(error => console.warn(error));
+  }
+  return true;
+}
+
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
   if (!current()) return false;
+  if (blockVeniceChatgptInjection()) return false;
   const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
   try {
     // A failed helper round-trip requests the matching pair even if its recorder
@@ -6675,6 +6695,7 @@ async function restoreSilentRecorders(tabs, intent) {
 const USAGE_REPLACE_RETRY_MS = 20_000;
 const USAGE_REPLACE_ATTEMPTS = 90;
 async function replaceUsageObserver(tabId, attempt = 0) {
+  if (blockVeniceChatgptInjection()) return false;
   const later = () => {
     if (attempt + 1 < USAGE_REPLACE_ATTEMPTS) setTimeout(() => { void replaceUsageObserver(tabId, attempt + 1); }, USAGE_REPLACE_RETRY_MS);
     return false;

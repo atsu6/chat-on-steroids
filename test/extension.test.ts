@@ -6682,6 +6682,7 @@ it('replaces the usage observer of an open tab only once it is not streaming', a
   const timers: Array<() => void> = [];
   const executed: Array<Record<string, unknown>> = [];
   const replace = vm.runInNewContext(`${source}\nreplaceUsageObserver`, {
+    blockVeniceChatgptInjection: () => false,
     tabReply: async () => statuses.shift(),
     setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; },
     chrome: { scripting: { executeScript: async (options: Record<string, unknown>) => { executed.push(options); return []; } } }
