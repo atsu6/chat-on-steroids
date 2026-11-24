@@ -1,5 +1,6 @@
 import { app, Menu, type BrowserWindow } from 'electron';
 import path from 'node:path';
+import { APP_DISPLAY_NAME } from '../shared/app-brand-name.js';
 import { mainText } from './main-texts.js';
 
 // The only development/production decision for display branding. Never change app.name:
@@ -8,7 +9,7 @@ import { mainText } from './main-texts.js';
 const development = !app.isPackaged || process.env.COS_DEV_BRAND === '1';
 export const appBrand = {
   development,
-  displayName: development ? 'Chat On Venice (dev)' : 'Chat On Venice'
+  displayName: development ? `${APP_DISPLAY_NAME} (dev)` as const : APP_DISPLAY_NAME
 } as const;
 
 /** Native image APIs read real packaged resources; checkout assets come from the same generator. */
@@ -28,7 +29,7 @@ export function refreshNativeBrand(window: BrowserWindow | null): void {
   const first = menu?.items[0];
   if (development && process.platform === 'darwin' && first?.submenu) {
     const submenu = Menu.buildFromTemplate(first.submenu.items.map(item => item.role === 'about'
-      ? { role: 'about', label: mainText('About Chat On Venice (dev)') } : item));
+      ? { role: 'about', label: mainText(`About ${APP_DISPLAY_NAME} (dev)`) } : item));
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { label: first.label, submenu }, ...menu!.items.slice(1)
     ]));

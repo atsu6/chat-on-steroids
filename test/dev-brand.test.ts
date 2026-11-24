@@ -5,9 +5,11 @@ import { transformSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { load as loadYaml } from 'js-yaml';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { APP_DISPLAY_NAME } from '../src/shared/app-brand-name.js';
 import { MAIN_TEXTS } from '../src/shared/main-texts.js';
 
-const name = 'Chat On Venice (dev)';
+const name = `${APP_DISPLAY_NAME} (dev)` as const;
+const about = `About ${APP_DISPLAY_NAME} (dev)` as const;
 const native = vi.hoisted(() => ({
   app: { isPackaged: false, setAboutPanelOptions: vi.fn(), setName: vi.fn(), getVersion: () => '2.1.55', getAppPath: () => '/app' },
   Menu: { getApplicationMenu: vi.fn(), buildFromTemplate: vi.fn((items: unknown[]) => ({ items })), setApplicationMenu: vi.fn() }
@@ -38,7 +40,7 @@ it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
   const { applyAppBrand } = await import('../src/renderer/app-brand.js');
   i18n.initLanguage();
   expect(dom.window.document.title).toBe('');
-  for (const displayName of ['Chat On Venice (dev)', 'Chat On Venice'] as const) {
+  for (const displayName of [name, APP_DISPLAY_NAME] as const) {
     applyAppBrand(displayName);
     i18n.setLanguage(language);
     expect(dom.window.document.title).toBe(displayName);
@@ -46,12 +48,12 @@ it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
     expect(dom.window.document.querySelector('.chat-head .title')?.textContent).toContain(displayName);
     const texts = await import('../src/renderer/main-texts.js');
     expect(texts.mainTexts()[displayName]).toBe(displayName);
-    expect(texts.mainTexts()['About Chat On Venice (dev)']).toBe(language === 'ja' ? 'Chat On Venice (dev)について' : 'About Chat On Venice (dev)');
+    expect(texts.mainTexts()[about]).toBe(language === 'ja' ? `${name}について` : about);
   }
 });
 
 it('registers dev/prod display names in the native contract and both required catalogs', () => {
-  for (const key of ['Chat On Venice (dev)', 'Chat On Venice'] as const) {
+  for (const key of [name, APP_DISPLAY_NAME] as const) {
     expect(MAIN_TEXTS).toContain(key);
     for (const language of ['en', 'ja']) {
       expect(JSON.parse(read(`src/renderer/locales/${language}.json`))[key]).toBe(key);
@@ -70,7 +72,7 @@ it.each([
   const otherMenu = { label: 'File' }, quit = { role: 'quit' };
   native.Menu.getApplicationMenu.mockReturnValue({ items: [{ label: 'Electron', submenu: { items: [{ role: 'about' }, quit] } }, otherMenu] });
   const { appBrand, appBrandAssetPath, refreshNativeBrand } = await import('../src/main/app-brand.js');
-  const displayName = development ? name : 'Chat On Venice';
+  const displayName = development ? name : APP_DISPLAY_NAME;
   expect(appBrand).toEqual({ development, displayName });
   expect(appBrandAssetPath('icons/trayTemplate.png')).toBe(packaged ? '/resources/icons/trayTemplate.png' : '/app/build/icons/trayTemplate.png');
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
@@ -81,7 +83,7 @@ it.each([
   expect(native.app.setName).not.toHaveBeenCalled();
   if (development && process.platform === 'darwin') {
     expect(native.Menu.setApplicationMenu).toHaveBeenCalledWith({ items: [
-      { label: 'Electron', submenu: { items: [{ role: 'about', label: 'About Chat On Venice (dev)' }, quit] } }, otherMenu
+      { label: 'Electron', submenu: { items: [{ role: 'about', label: about }, quit] } }, otherMenu
     ] });
   } else expect(native.Menu.setApplicationMenu).not.toHaveBeenCalled();
   const source = read('src/main/index.ts');

@@ -15,3 +15,5 @@ npm run typecheck
 npm run build
 npm test -- test/dev-brand.test.ts test/dev-icon.test.ts test/tray-image.test.ts test/window-lifecycle.test.ts test/packaging.test.ts test/main-texts.test.ts test/renderer-i18n-source.test.ts test/renderer-i18n.test.ts
 ```
+
+The shared display-name constant is `src/shared/app-brand-name.ts`. Upstream keeps the CoS label; one fork follow-up changes only that constant back to Venice.
