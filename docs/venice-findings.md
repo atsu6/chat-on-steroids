@@ -2339,3 +2339,61 @@ chatgpt-reinjection.json、runs.json、actions-permissions.json、workflows.json
 - CIのrunner実行結果はない。CIを受入根拠にするには、GitHub側のworkflow登録状態を確認して実行結果を取得する必要がある。
 - 通常CoSと同時使用するには、開発拡張の動的ChatGPT注入も止める対応が必要。backgroundの修正は今回行っていない。
 - 上流PRはc4931465由来のdev接尾辞案へ絞ってから作成する。API最小疎通は引き続き別作業。
+
+## 2026-11-25 — 手動CIの復旧・ChatGPT注入遮断・上流用ブランチ分離
+
+### 分かったこと
+
+- 28件のうち追加＋削除行数が大きい5件を、archive `5543094a`→監査開始HEAD `9c684b69`で再確認した。
+  findings +786/-0、ipc +36/-20、main/index +34/-3、AGENTS +18/-3、panel.visual +16/-5。
+  同数はファイル名順。実際の全diffは`outputs/venice-dispatch-and-pr/top-1.patch`～`top-5.patch`へ保存した。
+  各削除側も読み、findingsの全文保持、checkpoint確認条件の保持、branding差分一致、上流文書差分一致、
+  UI／a11y／通信禁止assertの保持を確認した。再分類0件、旧側だけの作業0件、取り込み0件。
+  根拠と再現コマンドはscope文書の「大きい上位5件の実際の差分」に掲載した。
+- workflow_dispatchは当初からあった。mainに実ファイルがあるのにGitHubのworkflow APIが404で、Actions画面もNo workflows foundだった。
+  既定ブランチを作業ブランチへ一時切替したところworkflowが登録され、CI IDは429223434になった。
+  直ちにmainへ戻し、push条件のmain限定・Actions権限は変えていない。
+  [GitHubの手動実行手順](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)のCLI経路でdispatchできる状態になった。
+  登録確認用run 45426591854は旧HEADなので中止し、最終コード9dd2aa89をrun 45428690299で手動実行した。
+- ChatGPT回復注入は「警告だけで許容」せず、`be53004d`で遮断した。
+  manifestがVeniceのみならrestoreChatgptTabとreplaceUsageObserverの両方を止め、
+  ChatGPT検出時にworkerごとに1回だけja/en catalog経由で1行警告を出す。
+  consoleだけでなくactionのbadgeを!、tooltipを同じ警告にして、拡張UIでも気付けるようにした。
+  通常CoSにChatGPTを任せるため、この開発拡張で二重フックを維持する利点がないことが理由。
+  既存ページに残る旧フックはreloadが必要で、その案内も警告に含める。
+  通常のChatGPT登録manifestは従来動作のまま。6回帰テストと関連3ファイル407テストが成功した。
+  既存usage observerテストは新しいguard依存をVMへ渡しただけで、assertは変更していない。
+- 上流用`codex/upstream-dev-suffix`をv2.1.55から作り、c4931465をno-commitでcherry-pickした。
+  Venice名・ferro・診断・icon生成変更を取り除き、表示名実装を`70589d99`へまとめた。後述の906666f2と合わせて上流用は2コミット。
+  devはChat On Steroids (dev)、prod名とCoSアイコンは据え置き。
+  productNameはChat On Steroids、appIdはcom.chatonsteroids.appのリテラル比較を保持した。
+  カタログのChat On Steroidsは元から12言語にあるため、新規ja/en限定の例外はdev名とAboutの2キーだけ。
+  旧キーの12言語検査は保持した。typecheck・build、対象7ファイル178 passed / 0 failed / 0 skipped、
+  headlessでen/ja・1280/800pxのdev/prod表示、文字切れなし、pageerror 0を確認した。
+  macOSのアプリメニューはcheckoutではElectron、packageではproductNameのまま残す。
+- フォークはca0a2b2dで同じ70589d99を祖先へ取り込み、Venice機能・旧カタログ・ferro・診断gateを保持した。
+  続く`9dd2aa89`はsrc/shared/app-brand-name.tsの定数だけをCoS→Veniceへ変える1ファイル1行の追従コミット。
+  productNameから表示名を導かない。上流用ブランチは新規pushのみで上書きせず、PRは作成していない。
+- フォークの追従後HEAD 9dd2aa89で、全体npm testを1回実行した。
+  CJS6ファイル100 passed / 0 failed / 0 skippedに続き、Vitestは527 passed / 0 failed / 20 skipped（ファイル、計547）、
+  12900 passed / 0 failed / 218 skipped（テスト、計13118）。typecheckとbuildも終了コード0。
+  フォークの実rendererもheadlessでen/ja・1280/800pxを確認し、Veniceのdev/prod名、文字切れなし、pageerror 0を確認した。
+  上流とforkの既存テストを削除・skip追加していない。新規6件の回復注入テストと19件の共有表示名テストを追加した。
+- runner実行で初めてWindowsのfixture不整合が見つかった。app-display-name／dev-brandのパス期待値がUnix固定、
+  findのnul.txtがWindows予約名、execのprintf／sleep／awk／shがWindowsの既定PowerShellでは無効だった。
+  製品側のpath解決・予約名拒否・shell既定は正しく、変更していない。
+  36f5dd56で期待パスをpath.joinへ変え、予約名を避け、同じ出力・待機・子processをNode fixtureで生成するようにした。
+  native shell経由の実行、stdout/stderr分離、64KiB、callId再取得、失効、descendant killのassertを保持した。
+  子processはstdoutのPID receiptで開始を確認し、固定sleepやPID-file pollingを加えていない。
+- Mac UIチェックも2件失敗した。verify-setup-guideは英語をcatalog数と別枠の両方で数えていたため、
+  言語IDの集合で英語を1回だけ数えるよう直した。同じ906666f2を上流用ブランチへ追記し、37a34a4aでforkにも取り込んだ。
+  What's Newはferroに旧CoS folder mark用translateが残り、ink左右15/13pxだった。既存ferroの形・色を維持し、古い光学補正だけを除いた。
+  flag判定・pixel許容閾値は変更していない。修正後は対象5ファイル82テスト＋CJS100件と、実Electronの両UIチェックが成功した。
+- CI run 45428690299のLinux両shardとCJS100件／typecheck／privacyは成功した。
+  修正前の残りjobを止め、最終コード37a34a4aをrun 45431889881で再実行した。
+  修正後runでもCJS／typecheck／privacy jobは成功した。全体の結論は実行終了後に追記する。
+
+### 残る条件
+
+- 旧フックが既に残るChatGPTページは再読み込みが必要。現在のページ操作を中断するreloadは今回行っていない。
+- backgroundの全ChatGPT関連機能を撤去したわけではなく、Veniceへの移行自体は継続中。API最小疎通は別作業。

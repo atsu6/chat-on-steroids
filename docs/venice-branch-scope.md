@@ -6,7 +6,7 @@
 
 旧`b8688e12`はv2.1.55に対する116ファイルのVenice基盤コミット。
 前回の133は、この116ファイルと旧brandingの26ファイルの和集合（9ファイルが重複）であり、branding単体が133ファイルになった数字ではない。
-recon・SSE・DOM/タブのagent loop、extensionの静的登録のVenice専用化、runごとのread/write/shell承認、
+recon・SSE・DOM/タブのagent loop、extensionの静的登録のVenice専用化とChatGPT回復注入の遮断、runごとのread/write/shell承認、
 `/venice/tools`とkernelのread/apply_patch/exec_command/find接続、出力・差分表示、失効・プロセス終了、
 i18n fallbackなど、製品動作を変更している。
 
@@ -23,10 +23,15 @@ i18n fallbackなど、製品動作を変更している。
   `c4931465..1253e3ef`の基盤変更117ファイルを対象にした。重複116、旧側だけ0、
   新側だけ1（このscope文書）。重複の内容は88ファイルが完全一致、28ファイルが異なる。
   後者には2.1.55の更新、branding、CJS検証修正、記録が含まれる。Venice gateway／exec／findなどの実装は一致する。
-- 上流向けの元にするのは`c4931465c8fb023dc99faa9b06fcf2667173b294`だけ。
-  提案はdev時の`Chat On Steroids (dev)`接尾辞に絞り、prodの名前・CoSアイコンは維持する。
-  現在のVenice名とferroを含む`c4931465`をそのまま提出しない。
-  PR準備時に上流直上でこのコミットだけを適用して絞り込み、`1253e3ef`と後続のVenice変更は含めない。
+- 上流用ブランチは`codex/upstream-dev-suffix`、tipは`906666f2`。
+  v2.1.55直上で`c4931465`を`cherry-pick --no-commit`し、dev接尾辞へ絞った`70589d99`と、英語catalogのUI検証カウント修正の2コミットにした。
+  devは`Chat On Steroids (dev)`、prodは既存の`Chat On Steroids`、アイコン・productName・appIdはupstreamのまま。
+  対象7ファイル178テスト、typecheck、build、headlessのen/ja・1280/800px表示確認が成功した。追加のsetup guide実Electron検証も成功した。PRは未作成。
+  Venice基盤・拡張・ferro・診断ログ・icon scriptの変更は上流用差分に含まれない。
+- フォークは`ca0a2b2d`で同じ上流用コミットを実際の祖先へ取り込んだ。Venice機能・全カタログ・ferroは維持した。
+  追従`9dd2aa89`は`src/shared/app-brand-name.ts`の定数をCoS→Veniceへ変える1ファイル1行だけ。
+  以後、表示ラベルをproductNameから導かず、この追従差分を維持する。
+  共通のcatalog数修正906666f2も37a34a4aで取り込み済み。上流用ブランチへの更新はfast-forwardだけで、上書きしていない。
   brandingは第1コミットに閉じているが、基盤のロケール変更には別途upstream同期の競合リスクが残る。
 
 ## 退役ブランチとの相違28ファイルを全件確認
@@ -73,9 +78,29 @@ i18n fallbackなど、製品動作を変更している。
 旧tipにしかないファイルも0件。証跡は`outputs/venice-retirement-audit/`の`01.patch`～`28.patch`、
 `locale-retention.json`、`origin-checks.txt`。ログや文書の追記を旧作業の欠落として数えていない。
 
+### 大きい上位5件の実際の差分
+
+比較を`5543094a..9c684b69`に固定し、追加行数＋削除行数で順位付けした。同数はファイル名順。
+全diffを`outputs/venice-dispatch-and-pr/top-1.patch`～`top-5.patch`へ保存した。
+以下のコマンドで、どのチェックアウトでも同じdiffを再取得できる。
+
+```sh
+git diff --no-ext-diff --unified=4 archive/venice-exec-retired-20261124 9c684b69 -- <ファイル>
+```
+
+| 順位 | ファイル | 追加／削除 | 差分を読んだ判断の根拠 |
+| --- | --- | --- | --- |
+| 1 | `docs/venice-findings.md` | +786 / -0 | 全て末尾追記。旧文書全文はbyte単位で同一のprefixとして残る。branding・実機診断・履歴分離・前回監査の記録が増えただけで、旧記録の削除0 |
+| 2 | `src/main/ipc.ts` | +36 / -20 | 削除側はcheckpointの確認dialog。共通helperへ同じ警告・25件上限・defaultId/cancelId=0・buttonsを移し、旧restoreCheckpointもそのhelperを呼ぶ。新しいrestoreTurnとcheckpointRefはv2.1.55由来、displayNameはbranding由来 |
+| 3 | `src/main/index.ts` | +34 / -3 | 旧→現差分がv2.1.55→c4931465のbranding差分と完全一致。削除3行は固定window title、tooltip、Tray生成行の置換で、Venice gatewayの初期化／終了処理は削除されていない |
+| 4 | `AGENTS.md` | +18 / -3 | 共通祖先f4c63cdd→v2.1.55の差分内容と完全一致。draft診断の数値説明とturn restore文書の更新で、Venice節を落とした差分ではない |
+| 5 | `test/venice-panel.visual.cjs` | +16 / -5 | 合成grant／revokeのRPC harness追加、bridgeの実注入、RPC順序assertを追加。UI操作・a11y・外部通信禁止を維持。旧画像保存先はignore対象outputsへ移動。ネットワークassertの期待値は合成RPCだけを加えたもの |
+
+上位5件も再分類0件。「こちらが新しい」は行の新旧だけでなく、旧処理・旧記録を残した上で何が追加／置換されたかを確認した結果である。
+
 ## ChatGPT側と通常CoSの併存：静的登録だけでは隔離できていない
 
-**現状は「ChatGPTに一切フックしないVenice専用拡張」ではない。通常CoSとの非干渉は未達。**
+監査時`9c684b69`では、静的登録だけを外した状態で動的回復注入が残っていた。以下はその時点の原因。
 
 - `extension/manifest.json`にはVeniceの静的content_scriptsだけがある。
   新しいChatGPTページへの初期注入はなくなり、旧tipも同じ状態だった。
@@ -94,9 +119,18 @@ backgroundの実装は旧archiveと同一で、manifestの差もversionだけで
 退役に伴う作業欠落ではなく、先行する「Venice専用化」の未完了が見つかった。
 reconのCJSテストが検査するのは静的manifestと観測器のhost guardであり、この動的回復経路は検査していない。
 
-通常CoSにChatGPTを任せる運用には、開発拡張の動的ChatGPT注入も止める対応が必要。
-今回の監査ではbackgroundを変更せず、この未達を明示する。根拠関数と注入要求は
-`outputs/venice-retirement-audit/chatgpt-reinjection.json`に記録した。
+### 修正：回復注入を止め、警告を表示する
+
+`be53004d`で「許容」ではなく遮断を選んだ。通常CoSがChatGPTを担当するため、この拡張で回復注入を続ける利点がない。
+manifestにVeniceだけが登録されている場合、`restoreChatgptTab`と別経路の`replaceUsageObserver`を入口で止める。
+ChatGPTを検出するとworkerごとに1回、ja/en catalog経由の1行警告をconsole.warnへ出し、拡張badgeを`!`、action tooltipを警告文にする。
+ChatGPTを明示登録した標準manifestでは従来の回復処理を維持する。
+
+新規の回復注入は止まるが、既に旧コードが注入したページのフックをこの修正だけで消すことはできない。
+警告はChatGPTページの再読み込みと通常CoS拡張の使用を案内する。他のChatGPT関連background処理は残っているため、ビルド全体の移行完了とは扱わない。
+実ページの既存操作を中断するreloadは今回行っていない。注入なし・警告1回・badge／tooltip・標準manifestの互換性を6テストで固定した。
+
+原因の合成記録は`outputs/venice-retirement-audit/chatgpt-reinjection.json`、修正後のテストは`test/venice-chatgpt-isolation.test.ts`。
 
 ## 旧b8688e12の全変更ファイル
 
@@ -293,7 +327,20 @@ push済み`590868eb`のcheck-runsも0件だった。PRもない。
 workflowのpush条件は`branches: [main]`なので、このブランチへのpushはCIを起動しない。
 repoのActions permissionsは`enabled: true`であり、Actions無効と推測したわけではない。
 ただしworkflow一覧APIも0件、workflow `ci.yml`の取得APIは404だった（main上のファイル存在は確認）。
-runner上のCIは**未検証**。actionlintとローカルの同じcommandの成功とは分けて扱う。
+この時点ではrunner上のCIは未検証だった。
+
+`workflow_dispatch`は元からmain／作業ブランチの両方に存在した。GitHub側のworkflow未登録を、
+既定ブランチmain→作業ブランチ→mainの一時切替で解消し、CI workflow ID `429223434`が登録された。
+既定ブランチはmainへ復元済み。push条件main限定とActions権限は変更していない。
+登録確認用run `45426591854`は旧HEADのため中止し、最終コード`9dd2aa89`で`gh workflow run ci.yml --ref codex/venice-foundation-and-branding`を実行した。
+
+このrun `45428690299`ではCJS100件とtypecheck／privacyが実runnerで成功した一方、Windows fixtureとUIチェックに失敗が出た。
+Unix固定パスの厳密比較、Windows予約名nul.txt、POSIX専用のexec fixtureが原因だった。
+36f5dd56で期待パスをOS標準joinへ変え、fixture名をnul-containing.txtへ変え、execの入力生成をnative shell経由のNodeへ移した。
+stdout／stderr／制限／失効／descendant kill等のassertは保持した。PID取得には子のstdout receiptを待つ。
+UIでは英語catalogの二重計数と、ferroに残った旧folder mark用の光学補正を直した。flag数やpixel許容閾値は緩めていない。
+変更後の対象5ファイル82テストとCJS100件、実Electronのsetup guide／What's Newチェックが成功した。
+最終コード37a34a4aをrun `45431889881`で再実行し、修正前runは中止した。
 
 ## 再配置後HEADの全体検証
 
@@ -314,6 +361,15 @@ workflowの`actionlint`も成功した。今回の追加はscripts／CI／文書
 証跡: `outputs/venice-head-verification/`の`tested-head.txt`、`full-test.log`、`cjs.log`、
 `typecheck.log`、`build.log`、`package.log`、`npm-test-entrypoint.log`、`actionlint.log`と各exit記録。
 
+### 追従後9dd2aa89の全体検証
+
+フォークの表示定数をVeniceへ戻した後、Node 22.23.5で`npm test`を全体1回実行した。
+Vitestはファイル527 passed / 0 failed / 20 skipped（計547）、
+テスト12900 passed / 0 failed / 218 skipped（計13118）。先行するCJS6ファイルも100 passed / 0 failed / 0 skipped。
+typecheckとbuildも終了コード0。forkと上流候補の両方で、headlessの実rendererのen/ja、1280/800px、dev/prod名と文字切れなしを確認した。
+上流既存テストの削除・skip追加はなく、forkの既存assertも保持した。
+証跡は`outputs/venice-dispatch-and-pr/`の`fork-tested-head.txt`、`fork-full-test.log`、`fork-final-typecheck.log`、`fork-final-build.log`、両ブランチのvisual画像。
+
 ## 「基盤102」の既定値・起動条件を抜き打ち確認
 
 「基盤」は内部処理だけを意味しない。次の製品動作変更も含む。
@@ -324,7 +380,7 @@ workflowの`actionlint`も成功した。今回の追加はscripts／CI／文書
 | モデル：`extension/venice-agent.js`、`extension/venice-send.js` | 現行agentは`sendViaUi`を使い、モデルを選び直さない。Veniceページで選択中のモデルを使用する。未使用の旧`sendTurn`も明示model引数が必須で、URL内の記録値を既定モデルとして使う経路ではない |
 | ポート：`src/shared/browser-bridge.ts`、`src/main/bridge-ports.ts`、`src/main/bridge.ts`、`extension/background.js` | Autoの8765–8769 → 18765–18769 → 38765–38769はupstreamと同じ。新たな既定ポートは追加していない。開発用8766固定は起動時の`CLF_BRIDGE_PORTS`指定で、製品既定値の変更ではない |
 | 起動：`src/main/index.ts`、`src/main/venice-tool-gateway.ts` | 既存のwhenReady後・single-instance guardを維持し、追加の初期化は過去のcall台帳の読み出し。grant復元・ツール再実行・モデル送信は行わない。トレイ診断はdev判定かつ`COS_TRAY_DIAGNOSTICS=1`のときだけ |
-| 拡張の開始条件：`extension/manifest.json`、`extension/background.js`、`extension/venice-agent.js`、`extension/venice-recon.js`、`extension/venice-panel.js` | 静的登録はVeniceだけだが、backgroundのChatGPT回復注入が残り、通常CoSとの非干渉は未達。Venice側はMAINの設置だけではタスクも記録も始めない。パネルRun後にgrantを要求して開始し、UI送信時に記録を開始する。ステップ既定10／上限40も新しい利用者可視の制御 |
+| 拡張の開始条件：`extension/manifest.json`、`extension/background.js`、`extension/venice-agent.js`、`extension/venice-recon.js`、`extension/venice-panel.js` | 静的登録はVeniceだけ。動的ChatGPT回復注入も遮断し、検出時に警告・badge・tooltipを表示する。旧フックの除去にはページ再読み込みが必要。Venice側はパネルRun後にgrantを要求して開始し、UI送信時に記録を開始する。ステップ既定10／上限40 |
 
 比較で`src/main/config.ts`、`src/main/bridge-ports.ts`、`src/shared/browser-bridge.ts`、
 `src/main/window-lifecycle.ts`にv2.1.55との差分がないことも確認した。
@@ -336,6 +392,6 @@ workflowの`actionlint`も成功した。今回の追加はscripts／CI／文書
 - `c4931465`はbrandingをv2.1.55直上へ作り直したコミット。新しい文書と3キーだけのen catalogを持ち、Venice gatewayへのimportを含まない。
 - その`c4931465`だけを別の素のv2.1.55ブランチへcherry-pickし、typecheck / build / 対象8ファイル190テストが成功した。
 - 既存キーの12言語検査を残し、新規3キーだけのja/en仕様と、全13 UI言語でのfallbackを検証した。基盤の完全en catalogを前提とする統合テストは基盤側に保持した。
-- 正式履歴はbrandingを先、Venice基盤を後にする。上流向けの元は最初の`c4931465`だけとし、dev接尾辞案へ絞ってから提案する。
+- 元の履歴はbranding→Venice基盤の順。上流用はc4931465から絞った`70589d99`で、フォークにも同じコミットを取り込んだ。
 
 証跡: `outputs/brand-isolation/proof-cherry-pick.log`、`proof-typecheck.log`、`proof-build.log`、`proof-tests.log`。全てローカルのignore対象。
