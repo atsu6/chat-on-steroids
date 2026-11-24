@@ -777,7 +777,7 @@
     "message": "ChatGPT'yi Chat On Steroids'a bağlar ve tarayıcı sekmelerini DOM, ekran görüntüleri ve geliştirici araçlarıyla arka planda denetler."
   },
   "extension_name": {
-    "message": "Chat On Steroids tarayıcı uzantısı"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Gelişmiş"
@@ -1276,5 +1276,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
-  }
+  },
+  "venice_patch_preview": {"message": "Uygulamadan önceki farklar"},
+  "venice_patch_full_diff": {"message": "Tüm farkları göster"},
+  "venice_exec_running": {"message": "Çalışıyor"},
+  "venice_exec_output_omitted": {"message": "Kısaltıldı: çıktının yalnızca ilk 64KB bölümü gösterilir."},
+  "venice_exec_output_error": {"message": "Çıktı alınamadı. Bu çalışmayı sonlandırmak için Durdur düğmesini kullanın."}
 }

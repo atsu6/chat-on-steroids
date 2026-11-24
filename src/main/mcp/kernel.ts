@@ -47,11 +47,12 @@ import { currentWorkspace, forgetMissingWorkspace, learnWorkspace, setCurrentWor
 import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from '../worktrees/index.js';
 import { getSessionProject, sessionSecretsShieldOff } from '../projects.js';
 import { shieldToolResult } from '../secrets-shield.js';
+import { veniceExecResult } from '../venice-exec.js';
 import { firstTaskRoot, resolveLinkedSkillAlias } from '../skill-access.js';
 import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js';
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveCapabilities } from '../config.js';
 import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
@@ -102,6 +103,7 @@ import {
   trackInFlight,
   trackMcpRequest,
   type CallContext,
+  type HostAdmittedOrigin,
   type CallCaller
 } from './call-context.js';
 import { openCallHold } from '../rotation-hold.js';
@@ -519,13 +521,17 @@ function noteTransportIdentity(transportKey: string | null): void {
  * A project that cannot be read keeps the shield on. The log names what was hidden, never the value.
  */
 async function shieldOutput(context: CallContext, name: string, result: ToolResult): Promise<ToolResult> {
+  return shieldSessionToolOutput(context.caller.sessionId, name, result);
+}
+
+/** The same output policy for host-admitted observations that do not execute another tool. */
+export async function shieldSessionToolOutput(sessionId: string | null | undefined, name: string, result: ToolResult): Promise<ToolResult> {
   if (getConfig().ui.secretsShield === false) return result;
   const shielded = shieldToolResult(result);
   if (!shielded.masked.length) return result;
   const counts = new Map<string, number>();
   for (const kind of shielded.masked) counts.set(kind, (counts.get(kind) ?? 0) + 1);
   const what = [...counts].map(([kind, count]) => `${count} ${kind}${count > 1 ? 's' : ''}`).join(', ');
-  const sessionId = context.caller.sessionId;
   const projectOff = sessionId ? await sessionSecretsShieldOff(sessionId).catch(error => {
     logWarn(`secrets shield: could not read this chat's project (${error instanceof Error ? error.message : String(error)}); masking anyway`);
     return false;
@@ -1369,6 +1375,10 @@ export async function validatedWorkspace() {
 /** The workspace, plus the virtual path of a learned one just dropped because its folder is gone. */
 async function liveWorkspace(): Promise<{ workspace: { virtual: string; real: string } | null; missing: string | null }> {
   const call = currentCall();
+  if (call?.origin?.type === 'venice') {
+    const root = call.origin.roots[0];
+    return { workspace: root ? { virtual: `/${root.name}`, real: root.path } : null, missing: null };
+  }
   const sessionId = call?.caller.sessionId;
   // Session project metadata is inherited by workers for grouping; the broker's exact
   // worktree allocation must take precedence, including after a restart or revival.
@@ -1416,6 +1426,17 @@ export async function resolveIn(
   requested: string,
   options: { allowMissing?: boolean; base?: string | null; access?: 'read'; remote?: boolean } = {}
 ): Promise<Resolved> {
+  const host = currentCall()?.origin;
+  if (host?.type === 'venice') {
+    if (!host.current()) throw new SandboxError('RUN_REVOKED');
+    const live = effectiveCapabilities(getConfig());
+    if (host.tool === 'apply_patch' && (!host.write || !(live.create || live.edit || live.move || live.deleteFile))) throw new SandboxError('TOOL_DISABLED: changing files is not permitted.');
+    if (host.tool === 'exec_command' && (!host.shell || !live.command)) throw new SandboxError('TOOL_DISABLED: command execution is not permitted.');
+    if ((host.tool === 'read' || host.tool === 'find' || host.preview) && !live.read) throw new SandboxError('TOOL_DISABLED: read requires reading permission.');
+    // No implicit managed/user-Skill roots or learned ChatGPT cwd on this surface.
+    // The ordinary resolver still owns canonical paths, traversal and symlinks.
+    return resolvePath(host.roots, requested, { ...options, base: options.base ?? ((host.tool === 'exec_command' || host.tool === 'find') && host.roots[0] ? `/${host.roots[0].name}` : null) });
+  }
   // The user's own Skill folders are served only to read tools, and never become a workspace.
   if (isUserSkillVirtualPath(requested)) {
     if (options.access !== 'read') throw new SandboxError(`${requested} is a read-only Skill folder. Copy the Skill into an approved folder to change it.`);
@@ -1564,6 +1585,8 @@ export interface SurfaceRegistrar {
   registered(): string[];
   /** Same registered handler/schema, with a fresh child recording context and inherited proof. */
   invokeNested(name: string, args: unknown, parent: CallContext): Promise<ToolResult>;
+  /** App-admitted top-level invocation; not a code-mode child or provider request. */
+  invokeHostAdmitted(name: string, args: unknown, origin: HostAdmittedOrigin): Promise<ToolResult>;
   descriptions(): Array<{ name: string; description: string }>;
 }
 
@@ -1593,6 +1616,48 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     findExposed,
     registered: () => [...names],
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
+    async invokeHostAdmitted(name, args, origin) {
+      // Host admission has an explicit tool allowlist; shell never follows from file permission.
+      if (surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
+      if (name === 'apply_patch' && origin.write !== true) return fail('TOOL_NOT_GRANTED');
+      if (name === 'exec_command' && (origin.shell !== true || !origin.exec)) return fail('TOOL_NOT_GRANTED');
+      if (name === 'find' && origin.read !== true) return fail('TOOL_NOT_GRANTED');
+      const reading = name === 'read' || name === 'find' || origin.preview === true;
+      const context: CallContext = {
+        origin: { ...origin, tool: name as 'read' | 'find' | 'apply_patch' | 'exec_command' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
+        allowUnattributed: false, evidence: emptyEvidence(), outcome: null,
+        publication: { completedAt: null, failed: false },
+        caller: { transportKey: `venice:${origin.runId}`, requestId: null,
+          conversationId: null, sessionId: origin.sessionId }
+      };
+      return trackMcpRequest(() => trackInFlight(context, () => runInCallContext(context, async () => {
+        const session = await getSession(origin.sessionId);
+        if (!session || session.conversationId || session.endedAt) return fail('VENICE_SESSION_UNAVAILABLE');
+        if (!origin.current()) return fail('RUN_REVOKED');
+        if (name === 'exec_command' && (!caps.command || !effectiveCapabilities(getConfig()).command)) return fail('TOOL_DISABLED: command execution is not permitted.');
+        if (reading && (!caps.read || !effectiveCapabilities(getConfig()).read)) return fail('TOOL_DISABLED: read requires reading permission.');
+        const entry = handlers.get(name);
+        const result = await guard(name, async () => {
+          if (!origin.current()) return fail('RUN_REVOKED');
+          return entry ? entry.run(args) : fail(`UNKNOWN_TOOL: ${name} is not available.`);
+        });
+        // Revocation during a read withholds its content, without executing it twice.
+        let delivered = !origin.current() ? fail('RUN_REVOKED')
+          : reading && !effectiveCapabilities(getConfig()).read ? fail('TOOL_DISABLED: read requires reading permission.')
+          : await shieldOutput(context, name, result);
+        if (!origin.current()) delivered = fail('RUN_REVOKED');
+        else if (reading && !effectiveCapabilities(getConfig()).read) delivered = fail('TOOL_DISABLED: read requires reading permission.');
+        if (name === 'exec_command' && delivered.structuredContent && !delivered.isError) {
+          delivered = veniceExecResult(delivered.structuredContent as unknown as import('../../shared/venice-integration.js').VeniceExecOutput);
+        }
+        if (origin.preview) return delivered;
+        await recordToolCall({ hostAdmitted: { runId: origin.runId, sessionId: origin.sessionId },
+          tool: name, args, content: delivered.content, outcome: context.outcome ?? (delivered.isError ? 'tool_rejected' : 'ok'),
+          durationMs: Date.now() - context.startedAt, startedAt: context.startedAt, evidence: context.evidence });
+        context.publication!.completedAt = Date.now();
+        return delivered;
+      })));
+    },
     invokeNested(name, args, parent) {
       return dispatch(name, args, parent.caller.transportKey, parent.caller.requestId, surface, async () => {
         const entry = handlers.get(name);

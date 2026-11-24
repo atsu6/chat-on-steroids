@@ -1706,6 +1706,27 @@
       </form>
     </dialog>
     <!-- #1826 (Haz's review): one schedule per chat, set from its ⋯ menu. Missed runs are skipped unless caught up. -->
+    <dialog class="plugin-dialog" id="veniceGrantDialog" aria-labelledby="veniceGrantTitle" aria-describedby="veniceGrantDescription">
+      <div class="plugin-dialog-head"><h2 id="veniceGrantTitle" data-i18n="Allow Venice to read files?">Veniceによるファイルの読み取りを許可しますか？</h2></div>
+      <div class="plugin-dialog-body">
+        <span id="veniceGrantUnassigned" data-i18n="Unassigned" hidden>未割り当て</span>
+        <span id="veniceGrantActionError" data-i18n="Could not complete the approval action." hidden>承認操作を完了できませんでした。</span>
+        <p id="veniceGrantDescription" data-i18n="For this run, Venice can read file contents in the selected folders and send them to Venice.">このrunでは、選択したフォルダー内のファイル内容を読み取り、Veniceへ送信できます。</p>
+        <dl><dt data-i18n="Target session">対象session</dt><dd id="veniceGrantSession"></dd><dt data-i18n="Target project">対象project</dt><dd id="veniceGrantProject"></dd>
+          <dt data-i18n="Venice tab">Veniceタブ</dt><dd id="veniceGrantTab" style="overflow-wrap:anywhere"></dd>
+          <dt data-i18n="Allowed tool">許可tool</dt><dd><span id="veniceGrantReadTools" data-i18n="File reading (core/read)">ファイルの読み取り（core/read）</span><span id="veniceGrantFindTools" data-i18n="File reading and search (core/read, core/find)" hidden>ファイルの読み取りと検索（core/read、core/find）</span></dd></dl>
+        <details><summary data-i18n="Instructions from the browser">ブラウザからの指示</summary><p id="veniceGrantInstruction" style="white-space:pre-wrap;overflow-wrap:anywhere"></p></details>
+        <p><button class="btn" id="veniceGrantPick" type="button" data-i18n="Choose folders">フォルダを選ぶ</button></p>
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0"><input id="veniceGrantWrite" type="checkbox"><span data-i18n="Also allow writing">書き込みも許可する</span></label>
+        <p data-i18n="Allow creating, editing, moving, and deleting files in the selected folders.">選択したフォルダー内のファイルの作成・編集・移動・削除を許可します。</p>
+        <label style="display:flex;align-items:center;gap:8px;margin:12px 0"><input id="veniceGrantShell" type="checkbox" aria-describedby="veniceGrantShellWarning"><span data-i18n="Also allow running commands">コマンドの実行も許可する</span></label>
+        <p id="veniceGrantShellWarning" data-i18n="Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.">あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。</p>
+        <ul id="veniceGrantRoots" style="overflow-wrap:anywhere"></ul>
+        <p id="veniceGrantEmpty" data-i18n="Select the folders Venice may read.">読み取りを許可するフォルダーを選択してください。</p>
+        <p class="plugin-error" id="veniceGrantError" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="veniceGrantDeny" type="button" data-i18n="Do not allow">許可しない</button><button class="btn btn-solid" id="veniceGrantAllow" type="button" disabled data-i18n="Allow for this run only">このrunだけ許可</button></div>
+      </div>
+    </dialog>
     <dialog class="plugin-dialog schedule-dialog" id="scheduleDialog" aria-labelledby="scheduleTitle">
       <div class="plugin-dialog-head"><h2 id="scheduleTitle">Schedule</h2><button class="btn" id="scheduleClose" type="button">Close</button></div>
       <form id="scheduleForm" class="plugin-dialog-body">

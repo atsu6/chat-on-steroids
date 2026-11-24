@@ -756,7 +756,7 @@
     "message": "Kết nối ChatGPT với Chat On Steroids và điều khiển các tab trình duyệt ở chế độ nền bằng DOM, ảnh chụp màn hình và công cụ dành cho nhà phát triển."
   },
   "extension_name": {
-    "message": "Tiện ích trình duyệt Chat On Steroids"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Nâng cao"
@@ -1225,5 +1225,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
-  }
+  },
+  "venice_patch_preview": {"message": "Khác biệt trước khi áp dụng"},
+  "venice_patch_full_diff": {"message": "Hiển thị toàn bộ khác biệt"},
+  "venice_exec_running": {"message": "Đang chạy"},
+  "venice_exec_output_omitted": {"message": "Đã lược bỏ: chỉ hiển thị 64KB đầu tiên của đầu ra."},
+  "venice_exec_output_error": {"message": "Không thể lấy đầu ra. Dùng nút Dừng để kết thúc lượt chạy này."}
 }

@@ -34,10 +34,12 @@ async function open(stored: unknown, read?: Promise<unknown>) {
   return { change, css, again, listeners };
 }
 
-it('loads the palette script with the content scripts, before content.js', () => {
-  const entry = manifest.content_scripts.find((entry: { js: string[] }) => entry.js.includes('content.js'));
-  expect(entry.js.indexOf('app-palette.js')).toBeGreaterThanOrEqual(0);
-  expect(entry.js.indexOf('app-palette.js')).toBeLessThan(entry.js.indexOf('content.js'));
+it('leaves automatic ChatGPT palette and content injection to the normal CoS extension', () => {
+  for (const entry of manifest.content_scripts) {
+    expect(entry.matches).toEqual(['https://venice.ai/*']);
+    expect(entry.js).not.toContain('app-palette.js');
+    expect(entry.js).not.toContain('content.js');
+  }
 });
 
 it('gives the CoS parts of the page the app palette for the theme ChatGPT shows', async () => {

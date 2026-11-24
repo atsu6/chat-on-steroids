@@ -1,4 +1,6 @@
+import { veniceToolGateway, veniceSenderSchema } from './venice-tool-gateway.js';
 import { appBrand } from './app-brand.js';
+import { createSession as createVeniceDebugSession } from './session/store.js';
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
@@ -113,7 +115,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getProject, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -810,6 +812,60 @@ export function personsMessage(entry: InputEntry): boolean {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  let veniceContextSession: string | null = null;
+  const requireVeniceRenderer = (event: IpcMainInvokeEvent): BrowserWindow => {
+    const window = getWindow();
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('venice_invalid_renderer');
+    return window;
+  };
+  veniceToolGateway.setApprovalUi({
+    notify: pending => { const window = getWindow(); if (window && !window.isDestroyed()) window.webContents.send('venice:grantPending', pending); },
+    context: async () => {
+      const selected = veniceContextSession ? await getSession(veniceContextSession) : null;
+      const session = selected && !selected.conversationId && !selected.endedAt ? selected
+        : await createVeniceDebugSession({ title: 'Venice tools', origin: { kind: 'desktop',
+          fromSessionId: selected?.id ?? null, agentId: null, task: '' } });
+      const project = session.projectId ? await getProject(session.projectId) : null;
+      return { sessionId: session.id, sessionTitle: session.title, project: project ? { id: project.id, name: project.name } : null };
+    }
+  });
+  handle('venice:context', async (payload, event) => {
+    requireVeniceRenderer(event);
+    veniceContextSession = z.object({ sessionId: z.string().nullable() }).strict().parse(payload).sessionId;
+  });
+  handle('venice:grantPending', async (_payload, event) => { requireVeniceRenderer(event); return veniceToolGateway.pendingApprovals(); });
+  handle('venice:grantPick', async (payload, event) => {
+    const window = requireVeniceRenderer(event);
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    if (!veniceToolGateway.pendingApprovals().some(row => row.id === id)) throw new Error('venice_approval_unavailable');
+    const chosen = await dialog.showOpenDialog(window, { ...dialogLabel('Choose folders'), properties: ['openDirectory', 'multiSelections'] });
+    return chosen.canceled ? veniceToolGateway.pendingApprovals() : veniceToolGateway.chooseApprovalRoots(id, chosen.filePaths);
+  });
+  handle('venice:grantAnswer', async (payload, event) => {
+    requireVeniceRenderer(event);
+    const { id, allow, write, shell } = z.object({ id: z.string().uuid(), allow: z.boolean(), write: z.boolean().optional().default(false), shell: z.boolean().optional().default(false) }).strict().parse(payload);
+    await veniceToolGateway.answerApproval(id, allow, write, shell);
+  });
+
+  // Temporary development-only grant owner; no UI, no generic IPC or root approval.
+  handle('venice:debugGrant', async (payload, event) => {
+    const window = getWindow();
+    if (app.isPackaged || process.env.NODE_ENV_ELECTRON_VITE !== 'development' ||
+        !window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) {
+      throw new Error('venice_debug_disabled');
+    }
+    const request = z.discriminatedUnion('action', [
+      z.object({ action: z.literal('grant'), sessionId: z.string().regex(/^\d{4}-\d{2}-\d{2}-[a-f0-9]{8}$/),
+        roots: z.array(z.string().min(1).max(4096)).min(1).max(16), sender: veniceSenderSchema }).strict(),
+      z.object({ action: z.literal('revoke'), runId: z.string().uuid() }).strict()
+    ]).parse(payload);
+    if (request.action === 'revoke') return { revoked: veniceToolGateway.revoke(request.runId) };
+    const session = await getSession(request.sessionId);
+    if (!session) await createVeniceDebugSession({ reservedId: request.sessionId,
+      title: 'Venice debug tools', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
+    const grant = await veniceToolGateway.grant(request.sessionId, request.roots, request.sender);
+    return { runId: grant.runId };
+  });
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);

@@ -5629,7 +5629,305 @@ function publishCompanionDiagnostics(changed = false) {
   return work;
 }
 
+// Venice work-tab bridge. Kept separate from the ChatGPT handlers below.
+const VENICE_DOM_TOOLS = Object.freeze({
+  query: function ({selector} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      const nodes = document.querySelectorAll(selector);
+      return {ok: true, result: {count: nodes.length, matches: Array.from(nodes).slice(0, 20).map((element, i) => ({
+        index: i + 1, tagName: element.tagName, id: element.id,
+        className: (element.getAttribute('class') ?? '').slice(0, 80),
+        text: (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+      }))}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  read_text: function ({selector} = {}) {
+    try {
+      if (selector !== undefined && (typeof selector !== 'string' || !selector.trim())) {
+        throw new TypeError('selector must be a non-empty string');
+      }
+      const element = selector === undefined ? document.body : document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      return {ok: true, result: element.innerText.replace(/\s+/g, ' ').trim().slice(0, 2000)};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  click_selector: function ({selector} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      if (element.matches(':disabled') || element.closest('[inert]') || typeof element.click !== 'function') {
+        throw new Error('Element cannot be clicked');
+      }
+      element.scrollIntoView({block: 'center', inline: 'nearest'});
+      if (!element.isConnected) throw new Error('Element was detached before click');
+      let clicked = false;
+      const onClick = () => { clicked = true; };
+      element.addEventListener('click', onClick, {capture: true});
+      try {
+        element.click();
+      } finally {
+        element.removeEventListener('click', onClick, {capture: true});
+      }
+      if (!clicked) throw new Error('No click event was observed');
+      return {ok: true, result: {clicked: true}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  scroll: function ({dy} = {}) {
+    try {
+      if (typeof dy !== 'number' || !Number.isFinite(dy)) throw new TypeError('dy must be a finite number');
+      window.scrollBy(0, dy);
+      return {ok: true, result: window.scrollY};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  fill: function ({selector, value} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      if (typeof value !== 'string') throw new TypeError('value must be a string');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      element.scrollIntoView({block: 'center', inline: 'nearest'});
+      let prototype = Object.getPrototypeOf(element), setter;
+      while (prototype && !setter) {
+        setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        prototype = Object.getPrototypeOf(prototype);
+      }
+      if (!setter) throw new Error('Element has no value setter');
+      setter.call(element, value);
+      element.dispatchEvent(new Event('input', {bubbles: true}));
+      element.dispatchEvent(new Event('change', {bubbles: true}));
+      return {ok: true, result: {filled: true}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  press: function ({selector, key} = {}) {
+    try {
+      if (typeof selector !== 'string' || !selector.trim()) throw new TypeError('selector must be a non-empty string');
+      if (typeof key !== 'string' || !key) throw new TypeError('key must be a non-empty string');
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Element not found');
+      for (const type of ['keydown', 'keypress', 'keyup']) {
+        element.dispatchEvent(new KeyboardEvent(type, {
+          key, bubbles: true, cancelable: true, composed: true, isComposing: false,
+          ...(key === 'Enter' ? {code: 'Enter', keyCode: 13, charCode: type === 'keypress' ? 13 : 0, which: 13} : {})
+        }));
+      }
+      return {ok: true, result: {pressed: true, key}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+  wait: async function ({ms} = {}) {
+    try {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) throw new TypeError('ms must be a non-negative finite number');
+      const delay = Math.min(ms, 10_000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return {ok: true, result: {ms: delay}};
+    } catch (error) {
+      return {ok: false, error: error.message};
+    }
+  },
+});
+
+// Navigation must settle before the next eval can read the destination rather than the old page.
+function waitForVeniceWorkTab(id) {
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const finish = (error, tab) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (error) reject(error); else resolve(tab);
+    };
+    const inspect = () => chrome.tabs.get(id).then(tab => {
+      if (tab.status === 'complete' && !tab.pendingUrl) finish(null, tab);
+    }, error => finish(error));
+    const onUpdated = tabId => { if (tabId === id) void inspect(); };
+    const onRemoved = tabId => { if (tabId === id) finish(new Error('作業タブが閉じられました。')); };
+    const timer = setTimeout(() => finish(new Error('作業タブの読み込みが30秒でタイムアウトしました。')), 30_000);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    void inspect();
+  });
+}
+
+// Stored document binding survives MV3 sleep; cancellation does not wait behind a tool/grant HTTP call.
+async function revokeVeniceGrant(tabId, documentId = null) {
+  const binding = await serializeTab(tabId, async () => {
+    await load();
+    const key = `cosVeniceGrant:${tabId}`, current = (await chrome.storage.session.get(key))[key];
+    if (!current || (documentId && current.documentId !== documentId)) return null;
+    await chrome.storage.session.set({[key]: {...current, cancelled: true}});
+    return current;
+  });
+  if (!binding) return false;
+  const reply = await call('/venice/grant/revoke', {method: 'POST', body: JSON.stringify({
+    sender: {tabId, documentId: binding.documentId}, ...(binding.runId ? {runId: binding.runId} : {})
+  })});
+  if (!reply.ok) throw new Error('runの失効を確認できませんでした。');
+  return Boolean(reply.data?.revoked);
+}
+// Bootstrap follows the ChatGPT listeners; standalone bridge use shares the same registration.
+let veniceGrantLifecycleStarted = false;
+function startVeniceGrantLifecycle() {
+  if (veniceGrantLifecycleStarted) return;
+  veniceGrantLifecycleStarted = true;
+  chrome.tabs.onUpdated.addListener((id, change) => {
+    if (change.status === 'loading' || change.url) void revokeVeniceGrant(id).catch(() => {});
+  });
+  chrome.tabs.onRemoved.addListener(id => { void revokeVeniceGrant(id).catch(() => {}); });
+}
+
+async function handleVeniceBridge(message, sender) {
+  // Never infer authority from message fields supplied by the page.
+  if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) ||
+      (sender.origin !== undefined && sender.origin !== 'https://venice.ai') ||
+      !isVeniceBridgeUrl(sender.url)) {
+    return {ok: false, error: 'Venice bridge sender is not authorized'};
+  }
+  startVeniceGrantLifecycle();
+  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument', 'previewPatch', 'execOutput'].includes(message.op)) {
+    if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
+    const brain = await chrome.tabs.get(sender.tab.id);
+    if (!isVeniceBridgeUrl(brain.url) || brain.pendingUrl) throw new Error('Venice brain tab has navigated away');
+    await load();
+    const identity = {browserId, tabId: sender.tab.id, documentId: sender.documentId};
+    const source = {tabId: sender.tab.id, documentId: sender.documentId};
+    const runKey = `cosVeniceLocalRun:${sender.tab.id}:${sender.documentId}`;
+    const bindingKey = `cosVeniceGrant:${sender.tab.id}`;
+    if (message.op === 'localIdentity') return {ok: true, result: identity};
+    if (message.op === 'localDocument') {
+      const previous = (await chrome.storage.session.get(bindingKey))[bindingKey];
+      if (previous && previous.documentId !== sender.documentId) await revokeVeniceGrant(sender.tab.id, previous.documentId);
+      await call('/venice/grant/document', {method: 'POST', body: JSON.stringify({sender: source})});
+      return {ok: true, result: {ok: true}};
+    }
+    if (message.op === 'setLocalRun') {
+      if (typeof message.args?.runId !== 'string') throw new Error('runId is required');
+      await chrome.storage.session.set({[runKey]: message.args.runId});
+      return {ok: true, result: {runId: message.args.runId}};
+    }
+    if (message.op === 'revokeLocal') {
+      const revoked = await revokeVeniceGrant(sender.tab.id, sender.documentId);
+      return {ok: true, result: {revoked}};
+    }
+    if (message.op === 'requestGrant') {
+      await revokeVeniceGrant(sender.tab.id, sender.documentId);
+      const requestId = message.id;
+      await serializeTab(sender.tab.id, () => chrome.storage.session.set({[bindingKey]: {documentId: sender.documentId, requestId, cancelled: false}}));
+      const reply = await call('/venice/grant/request', {method: 'POST', timeoutMs: 125_000, body: JSON.stringify({
+        sender: source, tabUrl: sender.url, requestId, tools: ['core/read', 'core/find'],
+        instructionSummary: String(message.args?.instructionSummary ?? '').slice(0, 1000)
+      })});
+      const accepted = await serializeTab(sender.tab.id, async () => {
+        const binding = (await chrome.storage.session.get(bindingKey))[bindingKey];
+        if (!binding || binding.requestId !== requestId || binding.cancelled) return false;
+        if (!reply.ok || !reply.data?.runId) throw new Error(reply.data?.error || reply.error || 'アプリの承認を取得できませんでした。');
+        await chrome.storage.session.set({[runKey]: reply.data.runId, [bindingKey]: {...binding, runId: reply.data.runId}});
+        return true;
+      });
+      if (!accepted) {
+        if (reply.data?.runId) await call('/venice/grant/revoke', {method: 'POST', body: JSON.stringify({sender: source, runId: reply.data.runId})});
+        throw new Error('このrunは停止されました。');
+      }
+      return {ok: true, result: {runId: reply.data.runId}};
+    }
+    const runId = (await chrome.storage.session.get(runKey))[runKey];
+    if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
+    const args = message.args ?? {};
+    if (args.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(args.tool) || (message.op === 'previewPatch' && args.tool !== 'apply_patch') || (message.op === 'execOutput' && args.tool !== 'exec_command')) throw new Error('Tool is not available on the Venice gateway');
+    const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({sender: source,
+      ...(message.op === 'previewPatch' ? {preview: true} : {}),
+      ...(message.op === 'execOutput' ? {output: true} : {}),
+      request: {runId, callId: args.callId, surface: 'core', tool: args.tool, args: args.args}
+    })});
+    if (!reply.ok) throw new Error(`Venice local tool transport failed: ${reply.data?.error || reply.error || reply.status}`);
+    return {ok: true, result: reply.data};
+  }
+  return serializeTab(sender.tab.id, async () => {
+    const brain = await chrome.tabs.get(sender.tab.id);
+    if (!isVeniceBridgeUrl(brain.url) || (brain.pendingUrl && !isVeniceBridgeUrl(brain.pendingUrl))) {
+      return {ok: false, error: 'Venice brain tab has navigated away'};
+    }
+    // One working tab per brain tab. Session storage survives service-worker suspension.
+    const key = `cosVeniceWorkTab:${sender.tab.id}`;
+    const stored = (await chrome.storage.session.get(key))[key];
+    let work = null;
+    if (Number.isInteger(stored)) {
+      if (stored === sender.tab.id) throw new Error('Venice brain tab cannot be used as the work tab');
+      try {
+        work = await chrome.tabs.get(stored);
+      } catch (error) {
+        if (!/No tab with id/i.test(error.message)) throw error;
+        await chrome.storage.session.remove(key);
+      }
+    }
+    const args = message.args ?? {};
+    if (message.op === 'ensureTab') {
+      if (typeof args.url !== 'string') throw new TypeError('url must be an absolute HTTP(S) URL');
+      const url = new URL(args.url);
+      if (!['http:', 'https:'].includes(url.protocol)) throw new TypeError('url must be an absolute HTTP(S) URL');
+      if (work) {
+        work = await chrome.tabs.update(work.id, {url: url.href});
+      } else {
+        work = await chrome.tabs.create({url: url.href, active: false});
+        try {
+          await chrome.storage.session.set({[key]: work.id});
+        } catch (error) {
+          await chrome.tabs.remove(work.id);
+          throw error;
+        }
+      }
+      const loaded = await waitForVeniceWorkTab(work.id);
+      return {ok: true, result: {tabId: work.id, url: loaded.url}};
+    }
+    if (!work) return {ok: false, error: '作業タブがありません。先に tab_open(url) を実行してください。'};
+    if (message.op === 'eval') {
+      if (!Object.hasOwn(VENICE_DOM_TOOLS, args.name)) throw new Error('未登録のDOMツール: ' + args.name);
+      const results = await chrome.scripting.executeScript({
+        target: {tabId: work.id, frameIds: [0]}, world: 'ISOLATED',
+        func: VENICE_DOM_TOOLS[args.name], args: [args.args ?? {}]
+      });
+      const main = results.find(row => row.frameId === 0);
+      if (!main || typeof main.result?.ok !== 'boolean') throw new Error('作業タブからDOMツールの結果を取得できませんでした。');
+      return main.result;
+    }
+    if (message.op === 'activate') {
+      await chrome.tabs.update(work.id, {active: true});
+      return {ok: true, result: {tabId: work.id}};
+    }
+    if (message.op === 'close') {
+      await chrome.tabs.remove(work.id);
+      await chrome.storage.session.remove(key);
+      return {ok: true, result: {tabId: work.id}};
+    }
+    return {ok: false, error: '未登録のVenice操作: ' + message.op};
+  });
+}
+
+function isVeniceBridgeUrl(url) {
+  try { return new URL(url).origin === 'https://venice.ai'; } catch { return false; }
+}
+// End Venice work-tab bridge.
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'cos-venice-bridge') {
+    handleVeniceBridge(message, sender).then(sendResponse, error =>
+      sendResponse({ok: false, error: String(error?.message ?? error)}));
+    return true;
+  }
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;
   if (!handler) {
     sendResponse({ ok: false, error: 'unknown_message' });
@@ -6669,3 +6967,5 @@ void load()
   .catch(() => undefined)
   .then(() => reportPresence())
   .then(() => scheduleRetry());
+
+startVeniceGrantLifecycle();

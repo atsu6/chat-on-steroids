@@ -92,6 +92,39 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('restricts every Venice approval IPC to the app main frame', async () => {
+  const previous = currentWindow, contents = { send: vi.fn(), mainFrame: {} };
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: contents };
+  try {
+    for (const channel of ['venice:context', 'venice:grantPending', 'venice:grantPick', 'venice:grantAnswer']) {
+      for (const event of [{sender:{},senderFrame:contents.mainFrame},{sender:contents,senderFrame:{}}]) {
+        expect(await handlers.get(channel)!(event, {})).toEqual({ok:false,error:'venice_invalid_renderer'});
+      }
+    }
+  } finally { currentWindow = previous; }
+});
+
+it('refuses the Venice debug grant outside development, in packages, and from foreign senders or frames', async () => {
+  const previousWindow = currentWindow, previousMode = process.env.NODE_ENV_ELECTRON_VITE, packaged = app.isPackaged;
+  const contents = { send: vi.fn(), mainFrame: {} };
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: contents };
+  const payload = { action: 'revoke', runId: '11111111-1111-4111-8111-111111111111' };
+  const handler = handlers.get('venice:debugGrant')!;
+  try {
+    process.env.NODE_ENV_ELECTRON_VITE = 'production';
+    expect(await handler({ sender: contents, senderFrame: contents.mainFrame }, payload)).toEqual({ ok: false, error: 'venice_debug_disabled' });
+    process.env.NODE_ENV_ELECTRON_VITE = 'development'; Object.assign(app, { isPackaged: true });
+    expect(await handler({ sender: contents, senderFrame: contents.mainFrame }, payload)).toEqual({ ok: false, error: 'venice_debug_disabled' });
+    Object.assign(app, { isPackaged: false });
+    expect(await handler({ sender: {}, senderFrame: contents.mainFrame }, payload)).toEqual({ ok: false, error: 'venice_debug_disabled' });
+    expect(await handler({ sender: contents, senderFrame: {} }, payload)).toEqual({ ok: false, error: 'venice_debug_disabled' });
+  } finally {
+    currentWindow = previousWindow; Object.assign(app, { isPackaged: packaged });
+    if (previousMode === undefined) delete process.env.NODE_ENV_ELECTRON_VITE;
+    else process.env.NODE_ENV_ELECTRON_VITE = previousMode;
+  }
+});
+
 it('saves "Chats working at once" from Settings and refuses a value outside 0–10 (#1694)', async () => {
   const before = getConfig();
   try {

@@ -1,3 +1,4 @@
+import en from './locales/en.json';
 import zhCN from './locales/zh-CN.json';
 import es from './locales/es.json';
 import zhTW from './locales/zh-TW.json';
@@ -14,7 +15,7 @@ import vi from './locales/vi.json';
 export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'tr' | 'vi' | 'fr' | 'pt-PT' | 'pt-BR' | 'de' | 'ru';
 const STORAGE_KEY = 'cos.ui.language';
 type Catalog = Readonly<Record<string, string>>;
-const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-PT': ptPT, 'pt-BR': ptBR, de, ru };
+const catalogs: Readonly<Record<Language, Catalog>> = { en, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-PT': ptPT, 'pt-BR': ptBR, de, ru };
 const sourceKeys = new Set(Object.values(catalogs).flatMap(catalog => Object.keys(catalog)));
 
 function parseLanguage(value: string | null | undefined): Language {
@@ -67,7 +68,10 @@ function fill(text: string, args: readonly unknown[]): string {
 export function t(source: string, args: readonly unknown[] = []): string {
   const catalog = language === 'en' ? undefined : catalogs[language];
   const key = catalog && Object.hasOwn(catalog, source) ? source : source.replace(/\s+/g, ' ').trim();
-  const translated = catalog && Object.hasOwn(catalog, key) ? catalog[key]! : source;
+  const englishKey = Object.hasOwn(en, source) ? source : source.replace(/\s+/g, ' ').trim();
+  const english = Object.hasOwn(en, englishKey) ? (en as Catalog)[englishKey]! : source;
+  // An identity entry keeps the source's original whitespace, as before.
+  const translated = catalog && Object.hasOwn(catalog, key) ? catalog[key]! : english === englishKey ? source : english;
   return fill(translated, args);
 }
 
@@ -91,11 +95,16 @@ export function pluralForms(locale: Language): Intl.LDMLPluralRule[] {
  */
 export function tn(one: string, other: string, count: number, args: readonly unknown[] = [count]): string {
   const form = pluralOf(language, count);
-  if (language === 'en') return fill(form === 'one' ? one : other, args);
-  const catalog = catalogs[language];
-  const translated = form !== 'other' && Object.hasOwn(catalog, `${other}|${form}`) ? catalog[`${other}|${form}`]!
-    : Object.hasOwn(catalog, other) ? catalog[other]! : form === 'one' ? one : other;
-  return fill(translated, args);
+  const catalog = language === 'en' ? undefined : catalogs[language];
+  if (catalog) {
+    const translated = form !== 'other' && Object.hasOwn(catalog, `${other}|${form}`) ? catalog[`${other}|${form}`]
+      : Object.hasOwn(catalog, other) ? catalog[other] : undefined;
+    if (translated !== undefined) return fill(translated, args);
+  }
+  // Missing translations use English plural rules too (e.g. Russian 21 is English plural).
+  const englishKey = pluralOf('en', count) === 'one' ? `${other}|one` : other;
+  const fallback = pluralOf('en', count) === 'one' ? one : other;
+  return fill(Object.hasOwn(en, englishKey) ? (en as Catalog)[englishKey]! : fallback, args);
 }
 
 type Property = 'textContent' | 'title' | 'placeholder' | 'aria-label' | 'aria-valuetext' | 'data-usage-hint' | 'data-empty';
@@ -162,11 +171,16 @@ function syncLanguageControls(): void {
 
 /** Run once on the static shell, before any user/provider content is inserted. */
 export function initLanguage(): void {
+  // Explicit source keys let a native form keep its standalone fallback copy.
+  for (const node of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+    const source = node.dataset.i18n!;
+    ui(node, 'textContent', () => t(source));
+  }
   const walker = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */);
   const texts: Text[] = [];
   while (walker.nextNode()) texts.push(walker.currentNode as Text);
   for (const node of texts) {
-    if (node.parentElement?.closest('script, style, svg, code, kbd, textarea, [translate="no"]')) continue;
+    if (node.parentElement?.closest('script, style, svg, code, kbd, textarea, [translate="no"], [data-i18n]')) continue;
     const source = node.data;
     const key = source.replace(/\s+/g, ' ').trim();
     if (sourceKeys.has(key)) ui(node, 'textContent', () => source.replace(/\S[\s\S]*\S|\S/, t(key)));

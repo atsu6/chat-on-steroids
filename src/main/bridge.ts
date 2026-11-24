@@ -1,3 +1,4 @@
+import { veniceToolGateway, veniceSenderSchema } from './venice-tool-gateway.js';
 import { modelSelectionDiagnostic, type ModelSelectionDiagnostic } from '../shared/model-selection-diagnostic.js';
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
@@ -1691,6 +1692,7 @@ export async function unpair(): Promise<void> {
   // This impossible-as-a-token sentinel preserves the user's explicit intent across both
   // the extension's next poll and an app restart.
   ++browserCredentialEpoch;
+  veniceToolGateway.revokeAll();
   cosSignInTransfer.cancel();
   await withBrowserCredentials(async () => {
     await setSecret('bridgeToken', BROWSER_DISCONNECTED);
@@ -3353,6 +3355,54 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // consume the browser's shared budget before failing origin/authentication.
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
   if (noteBrowserSeen(req)) changed();
+
+  if (route.startsWith('/venice/grant/') && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    const source = body && typeof body === 'object' ? body.sender : null;
+    const sender = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
+    if (!sender.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
+    try {
+      if (route === '/venice/grant/request') {
+        const { sender: _sender, tabUrl, ...request } = body;
+        if (typeof tabUrl !== 'string') return json(res, 400, { error: 'invalid_venice_tab' }, origin);
+        const reply = veniceToolGateway.requestGrant(request, sender.data, tabUrl);
+        const closed = () => { if (!res.writableEnded) veniceToolGateway.revokeSender(sender.data); };
+        res.once('close', closed);
+        try { return json(res, 200, await reply, origin); }
+        finally { res.off('close', closed); }
+      }
+      if (route === '/venice/grant/revoke') {
+        if (body.runId !== undefined && (typeof body.runId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.runId))) throw new Error('invalid_run');
+        const revoked = veniceToolGateway.revokeSender(sender.data, body.runId as string | undefined);
+        await veniceToolGateway.waitForRevocation();
+        return json(res, 200, { revoked }, origin);
+      }
+      if (route === '/venice/grant/document') {
+        veniceToolGateway.documentChanged(sender.data);
+        return json(res, 200, { ok: true }, origin);
+      }
+    } catch { return json(res, 400, { error: 'invalid_venice_grant_request' }, origin); }
+  }
+
+  if (route === '/venice/tools' && req.method === 'POST') {
+    const body = await readBody(req) as Record<string, unknown>;
+    const source = body && typeof body === 'object' ? body.sender : null;
+    const parsed = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
+    if (!parsed.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
+    try {
+      if (body.output === true) {
+        try { return json(res, 200, { output: await veniceToolGateway.execOutput(body.request, parsed.data) }, origin); }
+        catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : 'EXEC_OUTPUT_FAILED' }, origin); }
+      }
+      if (body.preview === true) {
+        try { return json(res, 200, await veniceToolGateway.previewPatch(body.request, parsed.data), origin); }
+        catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : 'PATCH_PREVIEW_FAILED' }, origin); }
+      }
+      return json(res, 200, await veniceToolGateway.call(body.request, parsed.data), origin);
+    } catch {
+      return json(res, 400, { error: 'invalid_venice_request' }, origin);
+    }
+  }
 
   // Only an explicit login operation accepts a session. Never put cookies in diagnostics,
   // command journals, status snapshots, recorder events or HTTP error descriptions.

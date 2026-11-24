@@ -1,3 +1,4 @@
+import type { VeniceGrantPending } from '../shared/venice-integration.js';
 import { ageOf, countdownClock } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
@@ -10196,6 +10197,7 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  void api.veniceContext?.(id);
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -10263,7 +10265,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   selectedCatalogFallback = null;
   resetActiveDetailRefresh();
-  newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  newChatSelected = true; selectedId = null; void api.veniceContext?.(null); selectedProjectId = projectId; detailFor = null; detailCursor = null;
   requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
@@ -10281,7 +10283,60 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   $<HTMLTextAreaElement>('chatInput').focus();
 }
 
+/** Native app approval: identity/roots come only from main, never from the model. */
+export function initVeniceGrantDialog(): void {
+  const dialog = document.getElementById('veniceGrantDialog') as HTMLDialogElement;
+  const pick = document.getElementById('veniceGrantPick') as HTMLButtonElement;
+  const allow = document.getElementById('veniceGrantAllow') as HTMLButtonElement;
+  const deny = document.getElementById('veniceGrantDeny') as HTMLButtonElement;
+  const error = document.getElementById('veniceGrantError')!;
+  const write = document.getElementById('veniceGrantWrite') as HTMLInputElement;
+  const shell = document.getElementById('veniceGrantShell') as HTMLInputElement;
+  let current: VeniceGrantPending | null = null, busy = false;
+  const sync = (): void => { pick.disabled = busy; write.disabled = busy; shell.disabled = busy; deny.disabled = busy; allow.disabled = busy || !current?.roots.length; };
+  const paint = (pending: VeniceGrantPending[]): void => {
+    const next = pending[0] ?? null;
+    if (next?.id !== current?.id) { busy = false; error.hidden = true; write.checked = false; shell.checked = false; }
+    current = next;
+    if (!next) { if (dialog.open) dialog.close(); return; }
+    document.getElementById('veniceGrantSession')!.textContent = `${next.sessionTitle} · ${next.sessionId}`;
+    document.getElementById('veniceGrantProject')!.textContent = next.project ? `${next.project.name} · ${next.project.id}` : document.getElementById('veniceGrantUnassigned')!.textContent;
+    document.getElementById('veniceGrantTab')!.textContent = `${next.tab.url} · tab ${next.tab.id}`;
+    document.getElementById('veniceGrantInstruction')!.textContent = next.instructionSummary;
+    const find = next.tools?.length === 2;
+    document.getElementById('veniceGrantReadTools')!.hidden = find;
+    document.getElementById('veniceGrantFindTools')!.hidden = !find;
+    const roots = document.getElementById('veniceGrantRoots')!;
+    roots.replaceChildren(...next.roots.map(path => {
+      const row = document.createElement('li'); row.textContent = path; return row;
+    }));
+    document.getElementById('veniceGrantEmpty')!.hidden = next.roots.length > 0;
+    sync();
+    if (!dialog.open) { dialog.showModal(); deny.focus(); }
+  };
+  const act = async (kind: 'pick' | 'allow' | 'deny'): Promise<void> => {
+    const id = current?.id;
+    if (!id || busy || (kind === 'allow' && !current?.roots.length)) return;
+    busy = true; error.hidden = true; sync();
+    try {
+      const reply = kind === 'pick' ? await api.veniceGrantPick(id) : kind === 'allow' && shell.checked ? await api.veniceGrantAnswer(id, true, write.checked, true) : kind === 'allow' && write.checked ? await api.veniceGrantAnswer(id, true, true) : await api.veniceGrantAnswer(id, kind === 'allow');
+      if (!reply.ok && current?.id === id) { error.textContent = reply.error; error.hidden = false; }
+      if (kind === 'pick' && reply.ok) paint(reply.data as VeniceGrantPending[]);
+    } catch {
+      if (current?.id === id) { error.textContent = document.getElementById('veniceGrantActionError')!.textContent; error.hidden = false; }
+    } finally { if (current?.id === id) { busy = false; sync(); } }
+  };
+  pick.addEventListener('click', () => void act('pick'));
+  allow.addEventListener('click', () => void act('allow'));
+  deny.addEventListener('click', () => void act('deny'));
+  dialog.addEventListener('cancel', event => { event.preventDefault(); void act('deny'); });
+  api.onVeniceGrantPending?.(paint);
+  void api.veniceGrantPending?.().then(reply => { if (reply.ok && Array.isArray(reply.data)) paint(reply.data); });
+}
+
 export function initChat(next: Deps): void {
+  initVeniceGrantDialog();
+  void api.veniceContext?.(selectedId);
   publishDraftAttachments();
   selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();

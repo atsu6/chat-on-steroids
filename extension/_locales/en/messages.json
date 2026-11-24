@@ -777,7 +777,7 @@
     "message": "Connects ChatGPT to Chat On Steroids and controls browser tabs in the background with DOM, screenshots and developer tools."
   },
   "extension_name": {
-    "message": "Chat On Steroids browser extension"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Advanced"
@@ -1276,5 +1276,13 @@
   },
   "content_revival_draft_appeared": {
     "message": "Something was typed in the chat while the worker's wake was getting ready, so the wake did not replace it."
-  }
+  },
+  "venice_patch_preview": {"message": "Diff before applying"},
+  "venice_patch_full_diff": {"message": "Show full diff"},
+  "venice_exec_running": {"message": "Running"},
+  "venice_exec_output_omitted": {"message": "Omitted: only the first 64KB of output is shown."},
+  "venice_exec_output_error": {"message": "Could not retrieve output. Use Stop to end this run."},
+  "venice_find_results": {"message": "Search results"},
+  "venice_find_empty": {"message": "No matches"},
+  "venice_find_truncated": {"message": "Truncated: narrow the search or increase max_results."}
 }
