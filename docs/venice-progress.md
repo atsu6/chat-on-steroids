@@ -9,7 +9,7 @@
 | 2. Electron read E2E — 完了 | `26188ebf`, `d2e9c4c6` | なし |
 | 3. apply_patch — 完了 | `c3137481`, `063e6cb9` | なし（全体 516 passed / 0 failed） |
 | 4. exec_command — 完了 | `eba8035a`, `969752ce`, `ab7dd7a8`, `0c3fb4fd` | なし（追加20件成功。全体の失敗と切り分けは下記） |
-| 5. write_stdin — 未着手 | — | run所有権を使うstdin/poll接続。write_stdin の前に 2.1.55 が出ていればマージと i18n 判断を先に行う |
+| 5. write_stdin — 未着手 | — | run所有権を使うstdin/poll接続。2.1.55 が出ていれば先にマージする |
 | 6. find — 未着手 | — | 検索接続 |
 | 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
 | 8. 通知 — 未着手 | — | Venice通知の接続・検証 |

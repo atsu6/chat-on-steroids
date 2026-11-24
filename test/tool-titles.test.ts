@@ -110,8 +110,8 @@ function recorded(): { titles: Set<string>; details: Set<string>; metrics: Set<s
 const AS_RECORDED = /^~?(?:\+\d+)?\s*(?:[−-]\d+)?$/;
 
 describe('tool rows in the person\'s language', () => {
-  it('has every phrase in every catalog', () => {
-    for (const locale of LOCALES) {
+  it('has every phrase in the required ja/en catalogs', () => {
+    for (const locale of ['ja', 'en']) {
       const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
       const missing = [...titles.TOOL_TITLE_TEMPLATES, ...titles.TOOL_DETAIL_WORDS].filter(key => !Object.hasOwn(catalog, key));
       expect(missing, locale).toEqual([]);
@@ -121,9 +121,8 @@ describe('tool rows in the person\'s language', () => {
   it.each(LOCALES)('translates every title, detail and metric the app records (%s)', locale => {
     const { titles: shown, details, metrics } = recorded();
     expect(shown.size).toBeGreaterThan(150);
-    // Left as recorded here and in a second language: not recognized. (A word can be the same as English in one
-    // language, as French "3 actions" is, but not in both.)
-    const other = locale === 'de' ? 'fr' : 'de';
+    // An optional language may use the English fallback. Japanese must still recognize each phrase.
+    const other = locale === 'ja' ? 'en' : 'ja';
     const kept = (local: (text: string) => string) => (text: string): boolean => {
       i18n.setLanguage(locale as never);
       if (local(text) !== text) return false;

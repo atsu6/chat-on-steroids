@@ -1402,3 +1402,42 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
   現行pipeは既存managerのstdin-closed契約を保つ。非空入力と空入力pollを区別して実装・検証する。
 - 補助CJSの既存2件は、初期通知とcore名前空間を含む現行契約に対するテスト更新が別途必要。
   今回は既存テスト変更禁止のため、そのまま記録した。
+
+
+## 2026-11-24 — ja/enを必須にし、他言語の不足キーを英語へフォールバック
+
+### 分かったこと
+
+- `codex/venice-exec`の`e4800747`から作業し、Node `v22.23.5`をVolta経由で使用した。
+- rendererには英語sourceへ戻す経路があったが、明示的なenカタログはなかった。
+  `src/renderer/locales/en.json`を追加し、英語source・既存の日本語キー18件の英訳・英語単数形84件を含む4,110件を登録した。
+  ja.jsonの既存日本語キーは全て登録済みで、既存の他言語カタログは変更・削除していない。
+- rendererの`t()` / `ui()`は選択言語 → en → sourceキーの順で解決する。
+  `tn()`の未翻訳分には英語の複数形規則を使い、Russian 21 / Japanese 1でも英語fallbackの数を誤らない。
+- 拡張は従来、アプリ指定言語でキーが欠けるとChromeの別言語へ戻ることがあった。
+  既存i18nヘルパーで英語カタログを保持し、キー単位・カタログ全体の欠落とも英語へ戻すようにした。
+  英語も無ければキーを返す。既存の明示的な英語fallback引数、placeholder、アプリ未指定時のChrome言語は維持した。
+- mainのtray / 通知 / native dialogは既存どおりrendererから訳を受け取り、未受信・未登録時は英語sourceを使う。
+  enカタログがMAIN_TEXTSの英語sourceと一致することもテストで確認した。
+- カタログの必須対象をja / enに変更した。renderer / extension / main-textsの完全性検査と、
+  同じ全言語必須方針を使っていたVenice承認・tool title・pet・Goal・Scheduled・Linux警告の検査を揃えた。
+  テスト宣言は削除せず、既存の他言語の表示・言語選択・動的UI保持の回帰検査も残した。
+- 追加8テストは、選択言語優先、英語fallback、双方にないキー、引数・draft・既存値の保持、
+  日本語キーの英語source対応、欠落時の英語複数形、拡張page / content scriptでの欠落を確認した。
+- 全体`npm test`は実装とテストを固定して1回実行し、終了コード0。
+  **520 passed / 0 failed / 20 skipped**（ファイル）、**12,806 passed / 0 failed / 218 skipped**（テスト）。
+  根拠: `outputs/venice-i18n/full-test.log` / `full-test.exit`。
+- `npm run typecheck`も終了コード0（`outputs/venice-i18n/typecheck.log`）。
+  headless Chromeでは既存のrenderer / i18n / CSSを実行し、日本語・英語・不足キーのある合成ロシア語カタログを確認した。
+  既存ロシア語訳は残り、不足したshellラベル・警告だけが英語になる。checkboxとdraftを保持し、PC / モバイルでも表示できた。
+  根拠: `outputs/venice-i18n/headless.log`と同フォルダーの画像。外部通信は全てローカル応答またはabortで、実Venice送信はない。
+
+### 不明なこと
+
+- 次の2.1.55取り込み時に、上流のi18n経路へどの差分が入るかは未確認。
+  今回は上流取得・マージを実行していない。
+
+### 次に確認したいこと
+
+- 5のwrite_stdinに進む前に、2.1.55が出ていれば先にマージする。
+  言語方針は今回決定済みで、以後の必須カタログはja / en。`docs/venice-i18n-decision.md`を参照する。

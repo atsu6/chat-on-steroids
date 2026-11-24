@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { stripTypeScriptTypes } from 'node:module';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -35,12 +35,12 @@ it('never sends shell permission for unchecked consent, denial or Escape', async
   f.publish([{ ...f.pending, id: 'second' }]); f.shell.click(); f.w.document.querySelector('dialog')!.dispatchEvent(new f.w.Event('cancel', { cancelable: true })); await Promise.resolve();
   expect(f.answer).toHaveBeenLastCalledWith('second', false);
 });
-it('registers the verbatim Japanese shell warning in all app catalogs and output labels in all extension catalogs', () => {
+it('registers the verbatim Japanese shell warning in required ja/en app catalogs and output labels in required ja/en extension catalogs', () => {
   const entries = {
     'Also allow running commands': 'コマンドの実行も許可する',
     'Venice can run commands with your permissions. Commands are not isolated within the selected folders and can also access files and the network outside those folders.': 'あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。'
   };
-  for (const file of readdirSync('src/renderer/locales').filter(file => file.endsWith('.json'))) {
+  for (const file of ['ja.json', 'en.json']) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8'));
     for (const [key, japanese] of Object.entries(entries)) {
       expect(catalog[key], `${file}: ${key}`).toBeTruthy(); expect(catalog[japanese]).toBe(catalog[key]);
@@ -48,7 +48,7 @@ it('registers the verbatim Japanese shell warning in all app catalogs and output
       if (file === 'ja.json') expect(catalog[key]).toBe(japanese);
     }
   }
-  for (const locale of readdirSync('extension/_locales')) {
+  for (const locale of ['ja', 'en']) {
     const catalog = JSON.parse(readFileSync(`extension/_locales/${locale}/messages.json`, 'utf8'));
     for (const key of ['venice_exec_running', 'venice_exec_output_omitted', 'venice_exec_output_error']) expect(catalog[key]?.message, `${locale}: ${key}`).toBeTruthy();
   }

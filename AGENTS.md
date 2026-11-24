@@ -7193,4 +7193,4 @@ Chat On Steroids の接続先を ChatGPT から venice.ai に差し替える。
 
 ## Venice: 言語
 言語方針は `docs/venice-i18n-decision.md` に従う。
-当面は12言語を維持し、2.1.55取り込み後にja + enと英語フォールバックへの切り替えを判断する。
+必須カタログはjaとen。他言語の不足キーは英語へフォールバックする。

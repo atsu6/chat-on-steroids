@@ -1,18 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import zhCN from '../src/renderer/locales/zh-CN.json';
+import ja from '../src/renderer/locales/ja.json';
 import type { Language } from '../src/renderer/i18n.js';
 
 const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', ru: 'Русский', tr: 'Türkçe', vi: 'Tiếng Việt', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
 const languages = Object.keys(names) as Language[];
-const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
+const requiredLanguages: Language[] = ['ja', 'en'];
+const catalogs = Object.fromEntries(languages.map(locale =>
   [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
 
-it.each(languages.filter(locale => locale !== 'en'))('translates the lost-opening delivery notice into %s', locale => {
+it.each(languages)('shows the lost-opening delivery notice in %s or its English fallback', async locale => {
   const key = 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.';
-  expect(catalogs[locale]?.[key]).toBeTruthy();
-  expect(catalogs[locale]?.[key]).not.toBe(key);
+  if (requiredLanguages.includes(locale)) expect(catalogs[locale]?.[key]).toBeTruthy();
+  const { t, setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage(locale);
+  expect(t(key)).toBe(catalogs[locale]?.[key] ?? catalogs.en![key] ?? key);
 });
 
 let dom: JSDOM;
@@ -123,7 +126,7 @@ it.each(languages)('explains exact-name Skill routing rather than topic matching
   const hint = input.closest('.setting')!.querySelector('em')!;
   expect(hint.textContent).toBe(source);
   expect(input.checked).toBe(false);
-  if (locale !== 'en') expect(catalogs[locale]).toHaveProperty(source);
+  if (requiredLanguages.includes(locale)) expect(catalogs[locale]).toHaveProperty(source);
   const { initLanguage, setLanguage } = await import('../src/renderer/i18n.js');
   initLanguage(); setLanguage(locale);
   expect(hint.textContent).toBe(catalogs[locale]?.[source] ?? source);
@@ -297,8 +300,8 @@ describe('app interface localization', () => {
     expect(confirmedComposerModel()).toEqual({ model: 'gpt-6-astra', reasoningEffort: 'high' });
   });
 
-  it('covers every static app label in every catalog', () => {
-    const catalog: Record<string, string> = zhCN;
+  it('covers every static app label in the required ja/en catalogs', () => {
+    const catalog: Record<string, string> = ja;
     const walker = document.createTreeWalker(document.body, 4);
     const missing: string[] = [];
     while (walker.nextNode()) {
@@ -315,8 +318,8 @@ describe('app interface localization', () => {
       }
     }
     expect(missing).toEqual([]);
-    for (const [locale, messages] of Object.entries(catalogs)) {
-      expect(Object.keys(catalog).filter(key => !Object.hasOwn(messages, key)), locale).toEqual([]);
+    for (const locale of requiredLanguages) {
+      expect(Object.keys(catalog).filter(key => !Object.hasOwn(catalogs[locale]!, key)), locale).toEqual([]);
     }
   });
 });
