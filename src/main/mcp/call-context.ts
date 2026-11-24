@@ -81,6 +81,9 @@ export interface CallCaller {
 /** Created only by the app's grant owner, never deserialised from a wire request. */
 export interface HostAdmittedOrigin {
   type: 'venice';
+  write?: boolean;
+  preview?: boolean;
+  tool?: 'read' | 'apply_patch';
   runId: string;
   sessionId: string;
   roots: Root[];

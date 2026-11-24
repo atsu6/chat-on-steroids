@@ -37,7 +37,7 @@ export const veniceGrantRequestSchema = z.object({ requestId: z.string().uuid(),
 type Dependencies = {
   load(): Promise<unknown>;
   save(records: CallRecord[]): Promise<void>;
-  execute(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots?: Root[]): Promise<unknown>;
+  execute(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots?: Root[], preview?: boolean): Promise<unknown>;
   saveGrants?(grants: unknown[]): Promise<void>;
 };
 const refusal = (callId: string, error: string): VeniceToolCallResponse => ({ callId, state: 'unknown', error });
@@ -99,7 +99,7 @@ export class VeniceToolGateway {
     row.roots = roots; row.view.roots = roots.map(root => root.path);
     this.publishApprovals(); return this.pendingApprovals();
   }
-  async answerApproval(id: string, allow: boolean): Promise<void> {
+  async answerApproval(id: string, allow: boolean, write = false): Promise<void> {
     const row = this.approvals.get(id);
     if (!row?.view || row.answering) throw new Error('venice_approval_unavailable');
     if (!allow) { this.finishApproval(row, { error: 'ファイルの読み取りを許可しませんでした。' }); return; }
@@ -110,7 +110,7 @@ export class VeniceToolGateway {
         if (await validateNewRoot(root.path, []) !== root.path) throw new Error('venice_folder_changed');
       }
       if (!this.approvals.has(id)) throw new Error('venice_approval_unavailable');
-      const grant = await this.grantWithRoots(row.view.sessionId, row.roots, row.sender, false);
+      const grant = await this.grantWithRoots(row.view.sessionId, row.roots, row.sender, false, write);
       if (!this.approvals.has(id)) { this.revoke(grant.runId); return; }
       this.finishApproval(row, { runId: grant.runId });
     } finally { row.answering = false; }
@@ -146,7 +146,7 @@ export class VeniceToolGateway {
   }
 
   /** Only the trusted app debug IPC calls this; never exposed over HTTP. */
-  async grant(sessionId: string, roots: string[], sender: VeniceSender): Promise<VeniceRunGrant> {
+  async grant(sessionId: string, roots: string[], sender: VeniceSender, write = false): Promise<VeniceRunGrant> {
     await this.initialize();
     const session = await getSession(sessionId);
     if (!session || session.conversationId || session.endedAt) throw new Error('VENICE_SESSION_UNAVAILABLE');
@@ -159,15 +159,16 @@ export class VeniceToolGateway {
       approved.push(resolved.root.path);
     }
     if (!approved.length || this.stopped || this.grants.size >= 32) throw new Error('VENICE_GRANT_UNAVAILABLE');
-    return this.grantWithRoots(sessionId, config.roots.filter(root => approved.includes(root.path)), sender, true);
+    return this.grantWithRoots(sessionId, config.roots.filter(root => approved.includes(root.path)), sender, true, write);
   }
 
-  private async grantWithRoots(sessionId: string, roots: Root[], sender: VeniceSender, configured: boolean): Promise<VeniceRunGrant> {
+  private async grantWithRoots(sessionId: string, roots: Root[], sender: VeniceSender, configured: boolean, write = false): Promise<VeniceRunGrant> {
     await this.initialize();
     const session = await getSession(sessionId);
     if (!session || session.conversationId || session.endedAt || this.stopped || this.grants.size >= 32) throw new Error('venice_grant_unavailable');
     const value: VeniceRunGrant = { runId: randomUUID(), sessionId, roots: roots.map(root => root.path),
-      tabId: sender.tabId, documentId: sender.documentId, tools: ['core/read'] };
+      tabId: sender.tabId, documentId: sender.documentId, tools: write ? ['core/read', 'core/apply_patch'] : ['core/read'],
+      ...(write ? { write: true } : {}) };
     const grant: Grant = { value, sender: veniceSenderSchema.parse(sender), active: true, roots: structuredClone(roots), configured };
     this.grants.set(value.runId, grant);
     try { await this.saveGrants(); }
@@ -212,18 +213,42 @@ export class VeniceToolGateway {
     return next;
   }
 
+  private authorize(request: VeniceToolCallRequest, sender: VeniceSender): { grant: Grant; current: () => boolean } | VeniceToolCallResponse {
+    const grant = this.grants.get(request.runId);
+    if (!grant || !isDeepStrictEqual(grant.sender, sender)) return refusal(request.callId, 'RUN_NOT_AUTHORIZED');
+    const current = () => !this.stopped && grant.active && (!grant.configured ||
+      grant.roots.every(root => getConfig().roots.some(live => !live.remote && live.path === root.path && live.name === root.name)));
+    if (!current()) return refusal(request.callId, 'RUN_REVOKED');
+    if (request.surface !== 'core' || !['read', 'apply_patch'].includes(request.tool) ||
+        !grant.value.tools.includes(`core/${request.tool}`) || (request.tool === 'apply_patch' && grant.value.write !== true)) return refusal(request.callId, 'TOOL_NOT_GRANTED');
+    return { grant, current };
+  }
+
+  /** Side-effect-free preview, under the same live grant/sender/root checks as execution. */
+  async previewPatch(input: unknown, source: unknown): Promise<{ diff: string }> {
+    const request = requestSchema.parse(input), sender = veniceSenderSchema.parse(source);
+    await this.initialize();
+    const admission = this.authorize(request, sender);
+    if (!('grant' in admission)) throw new Error(admission.error);
+    if (request.tool !== 'apply_patch') throw new Error('TOOL_NOT_GRANTED');
+    const { grant, current } = admission;
+    const result = await this.deps.execute(request, grant.value, current, grant.roots, true) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+    if (!current()) throw new Error('RUN_REVOKED');
+    const diff = result.content?.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n') ?? '';
+    if (result.isError) throw new Error(diff || 'PATCH_PREVIEW_FAILED');
+    if (Buffer.byteLength(diff) > 1_000_000) throw new Error('PATCH_PREVIEW_TOO_LARGE');
+    return { diff };
+  }
+
   private async admit(request: VeniceToolCallRequest, sender: VeniceSender): Promise<VeniceToolCallResponse> {
     try { await this.initialize(); }
     catch { return refusal(request.callId, 'VENICE_LEDGER_UNAVAILABLE'); }
     const old = this.records.get(request.callId);
     if (old) return isDeepStrictEqual(old.request, request) && isDeepStrictEqual(old.sender, sender)
       ? old.response : refusal(request.callId, 'CALL_ID_CONFLICT');
-    const grant = this.grants.get(request.runId);
-    if (!grant || !isDeepStrictEqual(grant.sender, sender)) return refusal(request.callId, 'RUN_NOT_AUTHORIZED');
-    const current = () => !this.stopped && grant.active && (!grant.configured ||
-      grant.roots.every(root => getConfig().roots.some(live => !live.remote && live.path === root.path && live.name === root.name)));
-    if (!current()) return refusal(request.callId, 'RUN_REVOKED');
-    if (request.surface !== 'core' || request.tool !== 'read' || !grant.value.tools.includes('core/read')) return refusal(request.callId, 'TOOL_NOT_GRANTED');
+    const admission = this.authorize(request, sender);
+    if (!('grant' in admission)) return admission;
+    const { grant, current } = admission;
     if (this.records.size >= 256) return refusal(request.callId, 'VENICE_LEDGER_FULL');
     const row: CallRecord = { request, sender, response: { callId: request.callId, state: 'pending' } };
     this.records.set(request.callId, row);
@@ -247,19 +272,19 @@ export class VeniceToolGateway {
 }
 
 /** Build a fresh live registrar for each call; no MCP URL, fake request proof or nested parent. */
-async function executeRead(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots: Root[] = []): Promise<unknown> {
+async function executeLocalTool(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots: Root[] = [], preview = false): Promise<unknown> {
   const config = getConfig();
   const caps = effectiveCapabilities(config);
-  // This stage is text-only and does not expose unrelated metadata/browse/command tools.
-  const reg = createRegistrar(null, { roots, caps, exposedCaps: { ...caps, read: true }, readOnly: config.readOnly,
+  // The host allowlist remains read + explicitly granted patch, never shell/Desktop.
+  const reg = createRegistrar(null, { roots, caps, exposedCaps: { ...caps, read: true, create: true, edit: true, move: true, deleteFile: true }, readOnly: config.readOnly,
     sessionTools: false, agentTools: false }, 'core');
   registerCoreTools(reg);
-  return reg.invokeHostAdmitted(request.tool, request.args, { type: 'venice', runId: grant.runId,
+  return reg.invokeHostAdmitted(request.tool, request.args, { type: 'venice', write: grant.write === true, preview, runId: grant.runId,
     sessionId: grant.sessionId, roots, current });
 }
 
 export const veniceToolGateway = new VeniceToolGateway({
   load: () => readDurable('venice-tools', { strict: true }),
-  save: rows => writeDurableNow('venice-tools', rows), execute: executeRead,
+  save: rows => writeDurableNow('venice-tools', rows), execute: executeLocalTool,
   saveGrants: rows => writeDurableNow('venice-grants', rows)
 });

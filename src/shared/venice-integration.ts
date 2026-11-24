@@ -54,8 +54,10 @@ export interface VeniceRunGrant {
   sessionId: string;
   tabId: number;
   documentId: string;
-  /** Surface-qualified tool names, e.g. core/read. First rollout grants only core/read. */
+  /** Surface-qualified allowlist. Existing read-only grants remain unchanged. */
   tools: string[];
+  /** Omitted/false on existing read grants; only explicit app consent enables writes. */
+  write?: boolean;
   /** Approved filesystem roots; this list does not sandbox a shell process. */
   roots: string[];
 }
