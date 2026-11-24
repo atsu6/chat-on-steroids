@@ -2391,9 +2391,18 @@ chatgpt-reinjection.json、runs.json、actions-permissions.json、workflows.json
   flag判定・pixel許容閾値は変更していない。修正後は対象5ファイル82テスト＋CJS100件と、実Electronの両UIチェックが成功した。
 - CI run 45428690299のLinux両shardとCJS100件／typecheck／privacyは成功した。
   修正前の残りjobを止め、最終コード37a34a4aをrun 45431889881で再実行した。
-  修正後runでもCJS／typecheck／privacy jobは成功した。全体の結論は実行終了後に追記する。
+  [修正後run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)は13 job中11 success／2 cancelled、全体の結論はfailureだった。
+  Windows全6 job・Linux全3 job・macOSの2 jobが成功し、CJS100件／typecheck／privacyも実runnerで成功した。
+  残るUI checks (macOS 2/2)とVerify macOS arm64 (1/2)はrunner未割当・steps 0で、GitHubがhosted runner取得失敗とarm64容量不足を注記していた。
+  `gh run rerun 45431889881 --repo atsu6/chat-on-venice --failed`で未実行の2 jobだけを1回再実行した。
+  attempt 2も2026-11-25 01:24～01:39 JSTの待機後に同じ理由で開始前キャンセルとなった。成功済み11 jobは再実行していない。
+  最終コードで実行されたテストに失敗はないが、2 jobは未実行でありCI全体は緑ではない。
+  runner構成やarchを変えず、テストの削除・skip追加・assertの緩和も行っていない。
+  証跡はoutputs/venice-dispatch-and-prのci-final-state.jsonとci-macos-*-retry-{job,annotations}.json。
+  以後のcommitは文書だけで、実装・テスト・workflow・依存関係はCI対象37a34a4aから変更していない。
 
 ### 残る条件
 
+- CI全体の成功確認はmacOS arm64 runnerの容量回復待ち。回復後、同じrunを`--failed`で再実行して上記2 jobを確認する必要がある。
 - 旧フックが既に残るChatGPTページは再読み込みが必要。現在のページ操作を中断するreloadは今回行っていない。
 - backgroundの全ChatGPT関連機能を撤去したわけではなく、Veniceへの移行自体は継続中。API最小疎通は別作業。

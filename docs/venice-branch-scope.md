@@ -342,6 +342,17 @@ UIでは英語catalogの二重計数と、ferroに残った旧folder mark用の�
 変更後の対象5ファイル82テストとCJS100件、実Electronのsetup guide／What's Newチェックが成功した。
 最終コード37a34a4aをrun `45431889881`で再実行し、修正前runは中止した。
 
+[run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)の最終結果はfailure。
+13 job中11がsuccess、残る`UI checks (macOS 2/2)`と`Verify macOS arm64 (1/2)`はcancelledだった。
+両jobともrunner未割当・steps 0で、GitHubの注記はhosted runnerを取得できなかったこととmacOS arm64の容量不足を示す。
+失敗jobだけを`gh run rerun 45431889881 --repo atsu6/chat-on-venice --failed`で1回再実行したが、
+attempt 2も同じ2 jobが2026-11-25 01:24～01:39 JSTの待機後に開始前キャンセルとなった。
+成功済み11 jobは再実行していない。Windows全6 job、Linux全3 job、macOSの残り2 jobは成功し、CJS100件・typecheck・privacyも実runnerで成功した。
+最終コードのテスト失敗は記録されていないが、未実行の2 jobがあるためCI全体の成功とは扱わない。
+両attemptのjob情報・注記と最終状態は`outputs/venice-dispatch-and-pr/ci-*.json`に保存した。
+容量回復後に同じ`--failed`を再実行して2 jobの成功を確認する作業が残る。runner構成・arch・skip・assertを変えて代替していない。
+以後のcommitは文書だけで、実装・テスト・workflow・依存関係はこのCI対象SHAと同じ。
+
 ## 再配置後HEADの全体検証
 
 実装の再配置後、未変更の`1253e3ef150329f2f435bf6c2af6efc5681b58ef`で実行した。
