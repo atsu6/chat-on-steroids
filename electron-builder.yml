@@ -31,6 +31,11 @@ files:
 # Common real-filesystem resources. Platform-specific tunnel/rg/native notices are appended
 # below because their filenames and executable formats differ by OS.
 extraResources:
+  - from: build/icons
+    to: icons
+    filter: ['trayTemplate.png', 'trayTemplate@2x.png']
+  - from: build/runtime-icon.png
+    to: runtime-icon.png
   - from: LICENSE
     to: LICENSE
   - from: THIRD-PARTY-NOTICES.txt
@@ -162,8 +167,6 @@ linux:
       to: node_modules
       filter: ['**/*']
   extraResources:
-    - from: build/runtime-icon.png
-      to: runtime-icon.png
     - from: resources/packaging/native/linux/${arch}/node_modules/@img/sharp-libvips-linux-${arch}/README.md
       to: THIRD-PARTY-NOTICES-sharp-libvips-linux-${arch}.md
     - from: resources/packaging/tunnel/linux/${arch}

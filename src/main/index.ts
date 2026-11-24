@@ -1,3 +1,4 @@
+import { appBrand, appBrandAssetPath, refreshNativeBrand } from './app-brand.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
 import { steerFromTelegram } from './telegram-steer.js';
@@ -8,6 +9,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
@@ -155,6 +157,8 @@ const MAIN_TEXTS_STATE = 'main-texts';
 let window: BrowserWindow | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
+// Native rendering diagnosis only: opt in with COS_TRAY_DIAGNOSTICS=1 on a dev-branded run.
+const brandDiagnosticsEnabled = appBrand.development && process.env.COS_TRAY_DIAGNOSTICS === '1';
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
@@ -198,7 +202,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(shownTheme(getConfig().ui.theme), getConfig().ui.appearance),
-    title: 'Chat On Steroids',
+    title: mainText(appBrand.displayName),
     webPreferences: {
       zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
@@ -395,6 +399,13 @@ const windowActivation = createWindowActivationGate(showWindow);
 
 /** Build the native tray image from encoded PNGs, never platform-dependent bitmap bytes. */
 function trayIcon(running: boolean): Electron.NativeImage {
+  if (appBrand.development && process.platform === 'darwin') {
+    const image = nativeImage.createFromBuffer(readFileSync(appBrandAssetPath('icons/trayTemplate.png')), { scaleFactor: 1 });
+    image.addRepresentation({ scaleFactor: 2,
+      dataURL: `data:image/png;base64,${readFileSync(appBrandAssetPath('icons/trayTemplate@2x.png')).toString('base64')}` });
+    image.setTemplateImage(true);
+    return image;
+  }
   const spec = trayImageSpec(process.platform, running);
   const [base, ...highDpi] = spec.representations;
   const image = nativeImage.createFromBuffer(base.png, { scaleFactor: base.scaleFactor });
@@ -418,7 +429,7 @@ function refreshTray(): void {
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`Chat On Steroids — ${label}`);
+  tray.setToolTip(mainText(appBrand.displayName));
   const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -494,6 +505,12 @@ void app.whenReady().then(async () => {
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
+  refreshNativeBrand(window);
+  onMainTextsChange(() => refreshNativeBrand(window));
+  // Display-only branding: never setName(), appId or userData for this development fork.
+  if (appBrand.development && process.platform === 'darwin') {
+    app.dock?.setIcon(appBrandAssetPath('runtime-icon.png'));
+  }
   await loadConnectorIdentity();
   if (windowActivation.isDisabled()) return;
   initControlApiPath(userData);
@@ -855,9 +872,23 @@ void app.whenReady().then(async () => {
   // Dock activation/re-launch can safely recreate or focus it.
   registerNativeWindowActivation(app, windowActivation.request);
 
-  tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+  const initialTrayImage = trayIcon(false);
+  tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform());
   tray.on('click', windowActivation.request);
   refreshTray();
+  if (brandDiagnosticsEnabled && process.platform === 'darwin') {
+    const imagePath = appBrandAssetPath('icons/trayTemplate.png');
+    logInfo(`branding: tray diagnostics=${JSON.stringify({
+      userDataBefore: userData, userDataAfter: app.getPath('userData'),
+      imagePath, exists: existsSync(imagePath),
+      fromPathEmpty: nativeImage.createFromPath(imagePath).isEmpty(),
+      imageEmpty: initialTrayImage.isEmpty(), template: initialTrayImage.isTemplateImage(),
+      imageSize: initialTrayImage.getSize(), trayCreated: true, trayDestroyed: tray.isDestroyed(),
+      ready: app.isReady(), packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath, appPath: app.getAppPath(),
+      configuredTooltip: mainText(appBrand.displayName)
+    })}`);
+  }
   onStatusChange(refreshTray);
   // The built-in browser's own hooks live in its module, which loads only once it is selected.
   onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });

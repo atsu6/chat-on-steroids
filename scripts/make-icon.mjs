@@ -7,12 +7,11 @@
  *   build/runtime-icon.png    256px Linux BrowserWindow icon, packaged as a real resource
  *   extension/icons/*.png     16/32/48/128 for the Chrome extension
  *
- *   artwork/app-icon-source.png  selected ImageGen concept (the one source image)
+ *   artwork/app-icon-source.png  RGBA raster of app-icon-source.svg (the source image)
  *
- * The selected concept is a single continuous ribbon that folds into both a folder
- * pocket and a conversation tail. It keeps the old product meaning while matching the
- * monochrome, generously rounded app redesign. The source is decoded, reduced to the
- * UI's ink/paper palette, and area-resampled here so every shipped size is reproducible.
+ * The development mark is a white gondola ferro on a dark-teal rounded square.
+ * Keep the existing PNG-to-ICO/PNG/BMP pipeline; its two-colour quantization now uses
+ * the development palette. The editable SVG and its checked-in RGBA raster stay together.
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -23,9 +22,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
 const EXTENSION_SIZES = [128, 48, 32, 16];
+const REVIEW_SIZES = [16, 22, 32, 48, 128, 256, 512];
 const SOURCE_PATH = path.join(root, 'artwork', 'app-icon-source.png');
-const INK = [12, 12, 14];
-const PAPER = [244, 244, 246];
+const INK = [18, 62, 66];
+const PAPER = [255, 255, 255];
 
 // ------------------------------------------------------------- source png
 
@@ -102,10 +102,9 @@ function decodeSourcePng(encoded) {
 const source = decodeSourcePng(readFileSync(SOURCE_PATH));
 
 /**
- * Image generation left a handful of isolated opaque flecks outside the mark. Keep the
- * largest alpha-connected component only; the ribbon, its outline and the local dot are
- * one continuous component, while dust is not. The threshold also discards the model's
- * near-transparent shadow matte before any downsampling can turn it into a grey halo.
+ * Keep the largest alpha-connected component only. The rounded square and ferro form
+ * one connected mark; the threshold excludes nearly transparent edge pixels before
+ * downsampling. This retains the established source-cleanup and crop behavior.
  */
 function sourceMask() {
   const count = source.width * source.height;
@@ -156,14 +155,14 @@ function sourceMask() {
 const visibleSource = sourceMask();
 
 /** Tight square crop with deliberate breathing room, derived from visible source alpha. */
-function sourceCrop() {
+function sourceCrop(mask = visibleSource) {
   let left = source.width;
   let top = source.height;
   let right = -1;
   let bottom = -1;
   for (let y = 0; y < source.height; y++) {
     for (let x = 0; x < source.width; x++) {
-      if (visibleSource[y * source.width + x] === 0) continue;
+      if (mask[y * source.width + x] === 0) continue;
       left = Math.min(left, x);
       top = Math.min(top, y);
       right = Math.max(right, x);
@@ -183,17 +182,17 @@ function sourceCrop() {
 const crop = sourceCrop();
 
 /**
- * Area-resample the generated concept after collapsing its near-monochrome shading to
- * the exact renderer palette. Premultiplied accumulation keeps transparent edges clean.
+ * Area-resample the two-colour source in the development palette.
+ * Premultiplied accumulation keeps transparent edges clean.
  */
-function render(size) {
+function render(size, mask = visibleSource, region = crop) {
   const pixels = Buffer.alloc(size * size * 4);
   for (let py = 0; py < size; py++) {
-    const y0 = crop.top + (py * crop.side) / size;
-    const y1 = crop.top + ((py + 1) * crop.side) / size;
+    const y0 = region.top + (py * region.side) / size;
+    const y1 = region.top + ((py + 1) * region.side) / size;
     for (let px = 0; px < size; px++) {
-      const x0 = crop.left + (px * crop.side) / size;
-      const x1 = crop.left + ((px + 1) * crop.side) / size;
+      const x0 = region.left + (px * region.side) / size;
+      const x1 = region.left + ((px + 1) * region.side) / size;
       let alphaWeight = 0;
       let totalWeight = 0;
       const premultiplied = [0, 0, 0];
@@ -205,8 +204,11 @@ function render(size) {
           const xWeight = Math.min(x1, sx + 1) - Math.max(x0, sx);
           const weight = Math.max(0, xWeight) * Math.max(0, yWeight);
           if (weight === 0) continue;
+          // Transparent mask pixels still occupy area: excluding them makes small
+          // template teeth/gaps fill in instead of antialiasing at 16px.
+          totalWeight += weight;
           const sourceIndex = sy * source.width + sx;
-          if (visibleSource[sourceIndex] === 0) continue;
+          if (mask[sourceIndex] === 0) continue;
           const at = sourceIndex * 4;
           const alpha = source.pixels[at + 3] / 255;
           const luminance =
@@ -216,7 +218,6 @@ function render(size) {
             premultiplied[channel] += colour[channel] * alpha * weight;
           }
           alphaWeight += alpha * weight;
-          totalWeight += weight;
         }
       }
       const output = (py * size + px) * 4;
@@ -376,3 +377,39 @@ for (const size of EXTENSION_SIZES) {
   writeFileSync(path.join(iconsDir, `icon${size}.png`), pngFor(size));
 }
 console.log(`Wrote extension/icons/icon{${EXTENSION_SIZES.join(',')}}.png`);
+
+// Complete review sizes, plus a larger transparent ferro for the 16px macOS tray.
+// The template excludes the teal tile and uses a black silhouette with alpha.
+const reviewDir = path.join(root, 'build', 'icons');
+mkdirSync(reviewDir, { recursive: true });
+const ferroMask = Uint8Array.from(visibleSource, (visible, index) =>
+  visible && source.pixels[index * 4] >= 128 ? 1 : 0);
+const ferroCrop = sourceCrop(ferroMask);
+// At 16 logical pixels, area-resampling alone merges the six teeth. Hint the tray
+// silhouette to the pixel grid: six one-pixel teeth with one-pixel gaps, a curved
+// crest, rear blade and turned foot. Retina doubles this same grid, not its blur.
+function trayTemplate(size) {
+  if (size !== 16 && size !== 32) {
+    const pixels = render(size, ferroMask, ferroCrop);
+    for (let at = 0; at < pixels.length; at += 4) pixels.fill(0, at, at + 3);
+    return pixels;
+  }
+  const rows = [[10, 12], [8, 11], [6, 10], [7, 10], [4, 10], [8, 10],
+    [4, 13], [8, 10], [4, 10], [8, 10], [4, 9], [8, 9], [4, 9], [7, 9], [4, 8], [6, 7]];
+  const scale = size / 16, pixels = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const [left, right] = rows[Math.floor(y / scale)];
+    for (let x = left * scale; x < (right + 1) * scale; x++) pixels[(y * size + x) * 4 + 3] = 255;
+  }
+  return pixels;
+}
+// Runtime files are authoritative. Review copies derive from these exact encoded bytes.
+const templates = new Map(REVIEW_SIZES.map(size => [size, encodePng(size, trayTemplate(size))]));
+for (const [size, filename] of [[16, 'trayTemplate.png'], [32, 'trayTemplate@2x.png']]) {
+  writeFileSync(path.join(reviewDir, filename), templates.get(size));
+}
+for (const size of REVIEW_SIZES) {
+  writeFileSync(path.join(reviewDir, `icon${size}.png`), pngFor(size));
+  writeFileSync(path.join(reviewDir, `ferro-template${size}.png`), templates.get(size));
+}
+console.log(`Wrote build/icons/icon{${REVIEW_SIZES.join(',')}}.png, ferro-template review variants and build/icons/trayTemplate{,@2x}.png`);
