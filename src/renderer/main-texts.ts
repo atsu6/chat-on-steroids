@@ -46,6 +46,7 @@ export function mainTexts(): Record<MainText, string> {
     'More files are not shown.': t('More files are not shown.'),
     'Keep current files': t('Keep current files'),
     'Restore files': t('Restore files'),
+    'Choose folders': t('Choose folders'),
     'Export as Markdown': t('Export as Markdown'),
     'You': t('You'),
     'Export as HTML': t('Export as HTML'),

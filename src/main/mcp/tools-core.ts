@@ -5,7 +5,10 @@ import { goalWorkerChat, imageExportCapable } from '../bridge.js';
 import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
-import { getConfig } from '../config.js';
+import { getConfig, effectiveCapabilities } from '../config.js';
+import { previewVenicePatch } from '../venice-patch-preview.js';
+import { veniceExecResult } from '../venice-exec.js';
+import { findInVeniceRoots } from '../venice-find.js';
 import { createHash } from 'node:crypto';
 import { checkAutomaticSend } from '../send-check.js';
 import { liveConnectorName } from './surfaces.js';
@@ -252,6 +255,8 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 
 /** One stable owner for the running model turn, upgraded lazily when page proof arrives. */
 function execPrincipal(): string | null {
+  const host = currentCall()?.origin;
+  if (host?.type === 'venice') return `venice:${host.runId}`;
   const caller = currentCaller();
   return executionPrincipal(caller.requestId, caller.sessionId ?? null);
 }
@@ -593,7 +598,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             max_results: z.number().int().min(1).max(500).optional().describe('Default 50.')
           })
           .superRefine((input, ctx) => {
-            if ((input.mode ?? 'name') !== 'content' && input.regex === true) {
+            if ((input.mode ?? (currentCall()?.origin?.type === 'venice' ? 'content' : 'name')) !== 'content' && input.regex === true) {
               ctx.addIssue({
                 code: 'custom',
                 path: ['regex'],
@@ -606,6 +611,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async ({ query, path: p, mode, include, exclude, case_sensitive, regex, max_results }) =>
         reg.guarded('search', 'find', async () => {
+          const host = currentCall()?.origin;
+          if (host?.type === 'venice') return findInVeniceRoots(
+            { query, path: p, mode, include, exclude, case_sensitive, regex, max_results }, ctx.roots,
+            requested => resolveIn(ctx.roots, requested, { access: 'read' }), host.current
+          );
           const limit = Math.min(500, Math.max(1, Math.floor(max_results ?? 50)));
           const deadline = Date.now() + 10_000;
           const scopes: Array<{ real: string; virtual: string; server?: ProjectFs }> = [];
@@ -806,6 +816,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async (input) =>
         reg.guarded('command', 'exec_command', async () => {
+          const host = currentCall()?.origin;
+          const venice = host?.type === 'venice' ? host : undefined;
+          if (venice && (input.tty === true || input.cmds !== undefined)) return fail('INVALID_ARGUMENT: Venice exec accepts one cmd and separate stdout/stderr pipes (tty=false).');
           const dir = await resolveCwd(ctx, input.workdir);
           const rawCommands = input.cmd === undefined ? input.cmds! : [input.cmd];
           const isBatch = input.cmd === undefined;
@@ -927,7 +940,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
-            if (!isBatch) {
+            if (!isBatch && !venice) {
               const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
               if (interceptedPatch.kind === 'correctness_error') {
                 return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
@@ -960,7 +973,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
             const owner = execPrincipal();
             const unread = backgroundExecObligations(owner).exitedUnread;
-            if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
+            if (!venice && unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
               const sessionIds = unread.map((session) => session.processId).join(', ');
               return fail(
                   `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
@@ -994,7 +1007,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               : deriveExecArgs(shell,
                 withPosixPathPrefix(boundCommand, shell.shellType, ripgrep ? nodePath.dirname(ripgrep) : null), useLoginShell);
             await validatedWorkspace();
+            if (venice && (!venice.current() || !venice.shell || !effectiveCapabilities(getConfig()).command)) {
+              unifiedExecManager.releaseProcessId(processId); return fail('RUN_REVOKED_OR_COMMAND_DISABLED');
+            }
+            if (venice?.exec) venice.exec.processId = processId;
             const output = await unifiedExecManager.execCommand({
+              observer: venice?.exec?.observer,
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
                 const sections = parseCommandBatchSections(rawOutput, batch.marker);
@@ -1007,13 +1025,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               shellType: shell.shellType,
               hookCommand: commandDetail,
               processId,
-              yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
+              yieldTimeMs: venice ? Math.min(input.yield_time_ms ?? 10_000, 30_000) : input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
               maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
               cwd: server ? os.tmpdir() : dir.real,
               displayCwd: dir.virtual,
               env: execChildEnvironment(),
-              tty: input.tty ?? DEFAULT_TTY
+              tty: venice ? false : input.tty ?? DEFAULT_TTY
             });
             // Which exact session or temporary request principal may later write to this
             // process id. Request custody upgrades lazily when exact correlation arrives.
@@ -1044,6 +1062,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             });
             noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
             logInfo(`tool exec_command ${shell.shellType} -> ${output.processId ?? `exit ${output.exitCode ?? 'unknown'}`}`);
+            if (venice?.exec) {
+              return veniceExecResult({ ...venice.exec.snapshot(), exitCode: output.exitCode, running: output.processId !== null });
+            }
             // `benign` was previously spent only on the error count, leaving the model to read
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.
@@ -1975,6 +1996,14 @@ async function runParsedPatch(
     };
   }
 
+  if (currentCall()?.origin?.type === 'venice' && currentCall()?.origin?.preview) {
+    try {
+      const diff = await previewVenicePatch(effectiveArgs.patch, effectiveBase.real, resolution.resolve,
+        resolution.fs, real => resolution.virtualPaths.get(real) ?? real);
+      return { result: ok(diff), content: diff, exitCode: 0 };
+    } catch (error) { return { result: fail(friendlyError(error)), content: null, exitCode: null }; }
+  }
+
   let rollbackSnapshots: Map<string, PatchRollbackSnapshot> | null = null;
   if (caps !== undefined) {
     try {
@@ -1985,6 +2014,15 @@ async function runParsedPatch(
   }
 
   await checkpointBeforePatch([...resolution.virtualPaths.keys()]);
+  const host = currentCall()?.origin;
+  if (host?.type === 'venice') {
+    if (!host.current() || host.write !== true) return { result: fail('RUN_REVOKED'), content: null, exitCode: null };
+    const live = effectiveCapabilities(getConfig());
+    const denial = patchCapabilityDenial(effectiveArgs.hunks, live) ??
+      await patchEffectCapabilityDenial(effectiveArgs.hunks, live, resolution.resolve, resolution.fs);
+    if (denial) return { result: fail(denial), content: null, exitCode: null };
+    if (!host.current()) return { result: fail('RUN_REVOKED'), content: null, exitCode: null };
+  }
   const execution = await executeApplyPatch({
     patch: effectiveArgs.patch,
     cwd: effectiveBase.real,

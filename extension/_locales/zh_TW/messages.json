@@ -756,7 +756,7 @@
     "message": "將 ChatGPT 連線至 Chat On Steroids，並透過 DOM、截圖與開發者工具在背景控制瀏覽器分頁。"
   },
   "extension_name": {
-    "message": "Chat On Steroids 瀏覽器擴充功能"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "進階"
@@ -1225,5 +1225,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "準備喚醒工作者時，對話中輸入了內容，因此喚醒沒有取代它。"
-  }
+  },
+  "venice_patch_preview": {"message": "套用前的差異"},
+  "venice_patch_full_diff": {"message": "顯示完整差異"},
+  "venice_exec_running": {"message": "執行中"},
+  "venice_exec_output_omitted": {"message": "已省略：僅顯示輸出的前64KB。"},
+  "venice_exec_output_error": {"message": "無法取得輸出。可使用停止按鈕結束此執行。"}
 }

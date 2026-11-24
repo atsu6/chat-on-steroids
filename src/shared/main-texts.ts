@@ -43,6 +43,7 @@ export const MAIN_TEXTS = [
   'Keep current files',
   'Restore files',
   // Native file dialogs and the worker checkout removal confirmation.
+  'Choose folders',
   'Export as Markdown',
   'You',
   'Export as HTML',

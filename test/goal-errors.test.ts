@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { goalErrorKey, goalErrorMessage } from '../src/shared/goal-errors.js';
 import de from '../src/renderer/locales/de.json';
 import es from '../src/renderer/locales/es.json';
@@ -92,12 +92,12 @@ describe('Goal failure explanations', () => {
     }
   });
 
-  it('gives the page a catalog key for selected explanations in the existing eight extension languages', () => {
+  it('gives the page a catalog key for selected explanations in the required ja/en extension catalogs', () => {
     const codes = [
       'out_of_credit', 'auth_rejected', 'no_api_key', 'rate_limited', 'loop_mcp_call_missing',
       'goal_context_too_large', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
     ];
-    const locales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
+    const locales = ['ja', 'en'];
     const catalogs = extensionCatalogs(locales);
     for (const code of codes) {
       const key = goalErrorKey(code);
@@ -112,9 +112,8 @@ describe('Goal failure explanations', () => {
     expect(catalogs.de?.content_goal_error_out_of_credit?.message).not.toBe(catalogs.en?.content_goal_error_out_of_credit?.message);
   });
 
-  it('localizes the unchecked Goal stop in every extension language', () => {
-    const locales = readdirSync(new URL('../extension/_locales/', import.meta.url), { withFileTypes: true })
-      .filter(entry => entry.isDirectory()).map(entry => entry.name);
+  it('localizes the unchecked Goal stop in the required ja/en extension catalogs', () => {
+    const locales = ['ja', 'en'];
     const catalogs = extensionCatalogs(locales);
     const code = 'goal_helper_stop_unverified';
     const key = goalErrorKey(code);

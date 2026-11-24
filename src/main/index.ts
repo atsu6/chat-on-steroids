@@ -1,3 +1,4 @@
+import { veniceToolGateway } from './venice-tool-gateway.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
 import { steerFromTelegram } from './telegram-steer.js';
@@ -491,6 +492,7 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  void veniceToolGateway.initialize().catch(() => logWarn('Venice tool ledger unavailable; local calls are disabled'));
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
@@ -957,7 +959,7 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
+        run: () => [veniceToolGateway.stop(), shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {

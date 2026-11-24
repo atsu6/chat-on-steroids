@@ -777,7 +777,7 @@
     "message": "Verbindet ChatGPT mit Chat On Steroids und steuert Browser-Tabs im Hintergrund über DOM, Screenshots und Entwicklertools."
   },
   "extension_name": {
-    "message": "Chat On Steroids Browser-Erweiterung"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Erweitert"
@@ -1276,5 +1276,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
-  }
+  },
+  "venice_patch_preview": {"message": "Änderungen vor dem Anwenden"},
+  "venice_patch_full_diff": {"message": "Vollständigen Diff anzeigen"},
+  "venice_exec_running": {"message": "Wird ausgeführt"},
+  "venice_exec_output_omitted": {"message": "Gekürzt: Nur die ersten 64KB der Ausgabe werden angezeigt."},
+  "venice_exec_output_error": {"message": "Ausgabe konnte nicht abgerufen werden. Beende diesen Lauf mit Stopp."}
 }

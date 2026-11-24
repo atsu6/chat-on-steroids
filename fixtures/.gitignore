@@ -1,0 +1,2 @@
+# Real observations stay local, even after credential masking.
+/venice-capture-*.json

@@ -30,6 +30,7 @@
   const LANGUAGE_KEY = 'appLanguage';
   const FOLDERS = Object.freeze({ en: 'en', de: 'de', es: 'es', fr: 'fr', 'pt-BR': 'pt_BR', 'pt-PT': 'pt_PT', ru: 'ru',
     tr: 'tr', vi: 'vi', ja: 'ja', ko: 'ko', 'zh-CN': 'zh_CN', 'zh-TW': 'zh_TW' });
+  let english = null, englishPending = null;
   let catalog = null;
   let catalogLanguage = null;
   const extensionPage = (() => { try { return location.protocol === 'chrome-extension:'; } catch { return true; } })();
@@ -40,17 +41,23 @@
     return response.json();
   }
 
+  async function readLanguage(folder, language) {
+    if (extensionPage) return readCatalog(folder);
+    const reply = await chrome.runtime.sendMessage({ type: 'i18n_catalog', language });
+    return reply && reply.ok === true && reply.messages && typeof reply.messages === 'object' ? reply.messages : null;
+  }
+  function loadEnglish() {
+    if (english) return Promise.resolve(english);
+    return englishPending ??= readLanguage('en', 'en').then(messages => { english = messages; return messages; }).catch(() => null).finally(() => { englishPending = null; });
+  }
+
   /** Extension pages read their own files; a content script asks the service worker for them. */
   async function loadCatalog(language) {
     const folder = FOLDERS[language];
     if (!folder) return null;
-    if (!extensionPage) {
-      const reply = await chrome.runtime.sendMessage({ type: 'i18n_catalog', language });
-      return reply && reply.ok === true && reply.messages && typeof reply.messages === 'object' ? reply.messages : null;
-    }
-    // A language this extension has no catalog for yet reads as English, the app's own fallback,
-    // rather than as whatever Chrome happens to be set to.
-    try { return await readCatalog(folder); } catch { return folder === 'en' ? null : readCatalog('en').catch(() => null); }
+    if (language === 'en') return loadEnglish().then(messages => messages || {});
+    // Keep a missing catalog empty: per-key fallback must use English plural rules too.
+    return readLanguage(folder, language).then(messages => messages || {}).catch(() => ({}));
   }
 
   async function useLanguage(language) {
@@ -82,6 +89,7 @@
     // A change event may already have brought a newer language; it wins.
     if (catalogLanguage === null) {
       catalog = reply.messages;
+      if (reply.language === 'en') english = reply.messages;
       catalogLanguage = reply.language;
       try { scope.dispatchEvent?.(new CustomEvent('clf-i18n-changed', { detail: { language: reply.language } })); } catch { /* No listeners here. */ }
     }
@@ -90,13 +98,14 @@
 
   const ready = (async () => {
     try {
-      if (await workerLanguage()) return;
-      // The stored copy: for a worker that has not heard from the app since it started.
-      const stored = await bounded(chrome.storage.local.get(LANGUAGE_KEY), 5_000, null);
-      await useLanguage(stored?.[LANGUAGE_KEY]);
+      if (!await workerLanguage()) {
+        const stored = await bounded(chrome.storage.local.get(LANGUAGE_KEY), 5_000, null);
+        await useLanguage(stored?.[LANGUAGE_KEY]);
+      }
     } catch {
-      // No storage or no catalog: chrome.i18n stays the source, as before.
+      // No storage or no catalog: keep Chrome's language until the app names one.
     }
+    if (!english) await bounded(loadEnglish(), 2_000, null);
   })();
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -121,17 +130,21 @@
     const safeFallback = applyFallback(fallback ?? key, substitutions);
     const entry = catalog && Object.prototype.hasOwnProperty.call(catalog, key) ? catalog[key] : null;
     if (entry && typeof entry.message === 'string' && entry.message) {
-      try { return formatEntry(entry, normalizeSubstitutions(substitutions)); } catch { /* Fall through to chrome.i18n. */ }
+      try { return formatEntry(entry, normalizeSubstitutions(substitutions)); } catch { /* Try English. */ }
     }
+    const englishEntry = english && Object.prototype.hasOwnProperty.call(english, key) ? english[key] : null;
+    const fromEnglish = () => englishEntry && typeof englishEntry.message === 'string' && englishEntry.message
+      ? formatEntry(englishEntry, normalizeSubstitutions(substitutions)) : safeFallback;
+    if (catalog) return fromEnglish();
     try {
       const values = normalizeSubstitutions(substitutions);
       const translated = chrome?.i18n?.getMessage?.(
         key,
         values.length === 0 ? undefined : values.length === 1 ? values[0] : values
       );
-      return typeof translated === 'string' && translated.length > 0 ? translated : safeFallback;
+      return typeof translated === 'string' && translated.length > 0 ? translated : fromEnglish();
     } catch {
-      return safeFallback;
+      return fromEnglish();
     }
   }
 
@@ -167,7 +180,11 @@
     }
     const formed = form === 'other' ? null : lookup(`${key}__${form}`, substitutions);
     if (formed) return formed;
-    return t(key, form === 'one' ? fallbackOne : fallbackOther, substitutions);
+    const own = lookup(key, substitutions);
+    if (own) return own;
+    const englishOne = Number.isFinite(count) && new Intl.PluralRules('en').select(count) === 'one';
+    const englishKey = englishOne && english && Object.prototype.hasOwnProperty.call(english, `${key}__one`) ? `${key}__one` : key;
+    return t(englishKey, englishOne ? fallbackOne : fallbackOther, substitutions);
   }
 
   function localizeAttribute(node, dataName, attribute) {

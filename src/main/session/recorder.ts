@@ -5,12 +5,14 @@
  * and result. The Chrome extension reports canonical ChatGPT message observations, turn
  * lifecycle, visible page-native activity, errors, and request-id evidence.
  *
- * Tool ownership has one path only: normalized HTTP x-request-id -> ChatGPT
+ * Provider tool ownership uses normalized HTTP x-request-id -> ChatGPT
  * message.metadata.request_id -> conversationId. The correlation registry records that
  * exact proof. ConversationId then maps to a session and, independently, to swarm role.
  * If the exact request cannot be proven, the caller stays unidentified. A separately
  * labelled, reversible single-turn recording context may place its history, but cannot
  * choose a caller, permission, workspace, agent, inbox or terminal owner.
+ * Venice's separate host-admitted path records the app-approved local session, labelled
+ * host_admitted, without manufacturing ChatGPT request/conversation evidence.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -1371,6 +1373,8 @@ export interface ToolContentPart {
 }
 
 export interface ToolCallInput {
+  /** Trusted in-process admission, distinct from a ChatGPT request-id proof. */
+  hostAdmitted?: { runId: string; sessionId: string };
   /** Provenance captured at admission, retained if native proof changes during execution. */
   providerSessionAnchor?: string;
   /** Captured before the handler. Presentation only; never binds caller or agent identity. */
@@ -1496,7 +1500,10 @@ function serializeRecording<T>(queues: Map<string, Promise<void>>, key: string, 
 export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | null> {
   if (!recordingEnabled()) return Promise.resolve(null);
   let attributing: Promise<Target>;
-  if (input.conversationId) {
+  if (input.hostAdmitted) {
+    attributing = Promise.resolve({ conversationId: null, sessionId: input.hostAdmitted.sessionId,
+      attribution: 'host_admitted', turnId: null });
+  } else if (input.conversationId) {
     const live = conversations.get(input.conversationId);
     const correlation = input.requestId ? requestCorrelation(input.requestId) : null;
     const target: Target = {
@@ -1827,7 +1834,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         target.conversationId !== null &&
         filed?.conversationId === target.conversationId &&
         !(await conversationWasSuperseded(target.conversationId));
-      attributionListener?.(
+      if (!input.hostAdmitted) attributionListener?.(
         target.conversationId,
         sessionId,
         currentConversation,
@@ -2147,6 +2154,7 @@ function agentConversation(agent: string): string | null {
  * into the other's raw history, and nothing downstream could tell that had happened.
  */
 async function targetSession(target: Target): Promise<string | null> {
+  if (target.attribution === 'host_admitted') return target.sessionId && await getSession(target.sessionId) ? target.sessionId : null;
   if (target.attribution === 'superseded') return ensureUnattributedSession();
   if (target.conversationId) {
     if (target.sessionId) {

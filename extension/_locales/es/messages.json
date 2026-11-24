@@ -798,7 +798,7 @@
     "message": "Conecta ChatGPT con Chat On Steroids y controla pestañas del navegador en segundo plano mediante DOM, capturas de pantalla y herramientas para desarrolladores."
   },
   "extension_name": {
-    "message": "Extensión de navegador de Chat On Steroids"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Avanzado"
@@ -1327,5 +1327,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "Se escribió algo en el chat mientras se preparaba el aviso del worker, así que el aviso no lo reemplazó."
-  }
+  },
+  "venice_patch_preview": {"message": "Diferencias antes de aplicar"},
+  "venice_patch_full_diff": {"message": "Mostrar todas las diferencias"},
+  "venice_exec_running": {"message": "En ejecución"},
+  "venice_exec_output_omitted": {"message": "Omitido: solo se muestran los primeros 64KB de la salida."},
+  "venice_exec_output_error": {"message": "No se pudo obtener la salida. Usa Detener para finalizar esta ejecución."}
 }

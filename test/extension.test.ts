@@ -102,26 +102,41 @@ describe('extension release metadata', () => {
   });
 
   /**
-   * The Fiber helper is the one piece of this extension that runs in ChatGPT's own
-   * JavaScript context, and it only does so because the manifest says `"world": "MAIN"`.
-   * Lose that one word and the file still loads, still finds nothing — `__reactFiber$` is
-   * invisible from an isolated world — and fails closed, so every collapsed row silently
-   * goes back to standing for one call. That is a regression with no symptom, which is
-   * why it is pinned here.
+   * The development companion must not double-hook ChatGPT alongside the normal CoS
+   * extension. Only Venice gets automatic scripts; its passive trace stays in MAIN,
+   * while the bridge and panel remain isolated from page JavaScript.
    */
-  it('runs only the fiber and bounded usage readers in the page context', async () => {
+  it('injects only on Venice and keeps its MAIN trace separate from isolated bridge code', async () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'extension', 'manifest.json'), 'utf8')
-    ) as { content_scripts: Array<{ js: string[]; world?: string }> };
+    ) as { content_scripts: Array<{ matches: string[]; js: string[]; world?: string }> };
 
-    const main = manifest.content_scripts.filter((entry) => entry.world === 'MAIN');
-    expect(main).toHaveLength(2);
-    expect(main.flatMap((entry) => entry.js).sort()).toEqual(['fiber.js', 'usage.js']);
+    const main = manifest.content_scripts
+      .filter((entry) => entry.world === 'MAIN')
+      .map(({ matches, js, world }) => ({ matches, js, world }));
+    expect(main).toHaveLength(1);
+    expect(manifest.content_scripts).toHaveLength(3);
+    for (const entry of manifest.content_scripts) {
+      expect(entry.matches).toEqual(['https://venice.ai/*']);
+      expect(entry.js.length).toBeGreaterThan(0);
+      for (const script of ['fiber.js', 'chatgpt-dom.js', 'app-palette.js', 'content.js']) {
+        expect(entry.js).not.toContain(script);
+      }
+    }
+
+    const venice = main.filter((entry) => entry.matches.includes('https://venice.ai/*'));
+    expect(venice).toEqual([
+      { matches: ['https://venice.ai/*'], js: ['venice-recon.js', 'venice-sse.js', 'venice-send.js', 'venice-agent.js', 'usage.js'], world: 'MAIN' }
+    ]);
     // The rest stays isolated: the page must not be able to reach the code that talks to
     // the service worker, holds the bridge token, or decides what gets recorded.
     for (const entry of manifest.content_scripts) {
       if (entry.world === 'MAIN') continue;
       expect(entry.js).not.toContain('fiber.js');
+      expect(entry.js).not.toContain('usage.js');
+      expect(entry.js).not.toContain('venice-recon.js');
+      expect(entry.js).not.toContain('venice-sse.js');
+      expect(entry.js).not.toContain('venice-send.js');
       expect(entry.world ?? 'ISOLATED').toBe('ISOLATED');
     }
   });

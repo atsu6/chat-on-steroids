@@ -819,7 +819,7 @@
     "message": "Подключает ChatGPT к Chat On Steroids и управляет вкладками браузера в фоне через DOM, скриншоты и инструменты разработчика."
   },
   "extension_name": {
-    "message": "Расширение браузера Chat On Steroids"
+    "message": "Chat On Venice (dev)"
   },
   "popup_advanced": {
     "message": "Дополнительно"
@@ -1378,5 +1378,10 @@
   },
   "content_revival_draft_appeared": {
     "message": "Пока готовилось пробуждение воркера, в чат что-то ввели, поэтому пробуждение не заменило этот текст."
-  }
+  },
+  "venice_patch_preview": {"message": "Изменения перед применением"},
+  "venice_patch_full_diff": {"message": "Показать все изменения"},
+  "venice_exec_running": {"message": "Выполняется"},
+  "venice_exec_output_omitted": {"message": "Сокращено: показаны только первые 64КБ вывода."},
+  "venice_exec_output_error": {"message": "Не удалось получить вывод. Нажмите «Остановить», чтобы завершить запуск."}
 }
