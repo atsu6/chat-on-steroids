@@ -2237,3 +2237,51 @@ node --test test/venice-agent.test.cjs test/venice-bridge.test.cjs test/venice-i
 ### 次に確認したいこと
 
 - API最小疎通は未着手。別途指示された範囲で、今回の表示確認とは分けてツール成功率を計測する。
+
+## 再配置後HEADの全体検証とVenice基盤の保守先一本化
+
+### 分かったこと
+
+- Node 22.23.5で、再配置後のclean HEAD `1253e3ef150329f2f435bf6c2af6efc5681b58ef`を検証した。
+  `npm test`は全体1回で、ファイル525 passed / 0 failed / 20 skipped（計545）、
+  テスト12875 passed / 0 failed / 218 skipped（計13093）。失敗はなく、原因調査のための再実行はしていない。
+  既存の218テスト／20ファイルのskipをそのまま保持し、削除・skip追加・assert変更はしていない。
+- 同じHEADのCJS6ファイルは100 passed / 0 failed / 0 skipped。
+  typecheck、build、darwin-arm64のunpackedパッケージ生成も全て終了コード0。
+  パッケージ後のresource／native runtime smokeも成功した。GUIの再起動・Venice実送信は今回行っていない。
+- `package.json`に、相対パス6本の`test:venice`を追加した。
+  通常の`npm test`の先頭で必ず実行し、失敗時は後続のVitestを止める。
+  CIはVitestを直接shard実行するため、Linux `checks` jobにも同じscriptを必須stepとして追加した。
+  入口変更後に実際の`npm test -- test/venice-integration.test.ts test/packaging.test.ts`を実行し、
+  CJS100件→Vitest2ファイル40件が全成功した。workflowのactionlintも成功した。
+- 旧`codex/venice-exec`のtipは`5543094aee1ca147b24d810bcb103152f93ca6d4`。
+  v2.1.55との共通祖先からの変更116ファイルは、`c4931465..1253e3ef`の117ファイルと116件重複し、
+  旧側だけのファイルは0。重複のうち88件が完全一致、28件が異なる。
+  差分には上流2.1.55、branding、検証修正・記録が含まれ、gateway／exec／find本体は一致する。
+  2ブランチを並行保守せず、`codex/venice-foundation-and-branding`だけを正にする。
+  旧tipは`archive/venice-exec-retired-20261124`へ保存し、旧ブランチはローカル／originとも退役させる。
+- `git ls-remote`のpeeled targetで旧archive2本を照合した。
+  `archive/brand-dev-name-pre-squash-20261124` → `56a765378da5746866e6cc447b108b5e7c7fe33f`、
+  `archive/brand-dev-name-before-isolation-20261124` → `56ebe1b217afc7dab9f69903d310f9685b7a2619`。
+  いずれもリモートに存在し、報告済みのcommitと一致した。
+- 「基盤102」には利用者可視の動作変更もある。権限は未承認／root未選択から始め、承認の既定はreadのみ
+  （検索要求時はread＋find）、write／shellは独立したOFF。一般のcapability設定は変更していない。
+  UI senderは選択中モデルを維持し、既定ポート15本もupstreamのまま。
+  起動時はcall台帳を読み込むだけで、grant復元・実行・送信は始めない。
+  一方、Venice専用の拡張登録、Run→承認→開始、ステップ既定10／上限40は明確な製品動作の追加である。
+  scope文書とブランチ説明を「Veniceツール・権限・拡張の動作変更＋独立devブランディング」へ具体化した。
+- 上流向けは`c4931465`単体だけと決定した。このSHAは変更せず、基盤と今回の検証入口は自分のリポジトリに残す。
+  brandingキーは第1コミットに閉じるが、基盤側のロケール競合リスクは別に残る。
+
+証跡: `outputs/venice-head-verification/`の各log／exit、`tested-head.txt`、`branch-overlap.json`。
+パッケージは`release/mac-arm64/Chat On Steroids.app`。分類・保守先・検証入口の地図は`docs/venice-branch-scope.md`。
+
+### 不明なこと
+
+- 追加したCI stepのGitHub runner上での結果は未実測。ローカルの同じcommandとworkflow静的検証は成功した。
+- API最小疎通とツール成功率は引き続き未計測。
+
+### 次に確認したいこと
+
+- 上流PRを作成する際は`c4931465`だけを対象にし、Venice基盤を混ぜない。
+- API最小疎通は別途承認された範囲で行う。今回の検証は実送信を含まない。

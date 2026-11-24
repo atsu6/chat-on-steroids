@@ -18,7 +18,7 @@ jobs:
     # Checks that read the source, not the OS: once, on Linux, beside the test shards (CI speed-up
     # 2026-10-31; they used to run before the tests on every OS). The notices check reads each OS's own
     # optional native packages, so it stays on every OS, in its first test shard.
-    name: Typecheck and privacy
+    name: Typecheck, privacy and Venice
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -40,6 +40,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Venice CJS tests
+        run: npm run test:venice
 
   verify:
     # The unit tests in parallel shards, balanced by measured seconds (test/weighted-sequencer.ts,
