@@ -53,7 +53,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     }
     await page.setViewportSize({width: 1400, height: 1000});
     const row = (prefix, sizes) => sizes.map(size => `<figure style="margin:0;text-align:center"><img width="${size}" height="${size}" src="data:image/png;base64,${fs.readFileSync(path.join(root, `build/icons/${prefix}${size}.png`)).toString('base64')}"><figcaption>${size}px</figcaption></figure>`).join('');
-    await page.setContent(`<style>body{margin:32px;background:#eee;font:14px system-ui}.row{display:flex;gap:28px;align-items:center}.template{background:#123e42;color:white;padding:24px;margin-top:24px}img{image-rendering:auto}</style><div class="row">${row('icon', [16,22,32,48,128,256,512])}</div><div class="row template">${row('ferro-template', [16,22,32,48,128])}</div>`);
+    await page.setContent(`<style>body{margin:32px;background:#eee;font:14px system-ui}.row{display:flex;gap:28px;align-items:center}.template{background:white;color:#111;padding:24px;margin-top:24px}img{image-rendering:auto}</style><div class="row">${row('icon', [16,22,32,48,128,256,512])}</div><div class="row template">${row('ferro-template', [16,22,32,48,128])}</div>`);
     await page.screenshot({path: path.join(output, 'icon-sizes.png')});
     assert.deepEqual(errors, []);
     console.log('Shell branding: dev/prod, en/ja, 1280/800px, no clipping or page errors; rendered 16/22/32/48/128/256/512px icons and transparent tray variants.');

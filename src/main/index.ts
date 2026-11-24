@@ -871,7 +871,11 @@ void app.whenReady().then(async () => {
   // Dock activation/re-launch can safely recreate or focus it.
   registerNativeWindowActivation(app, windowActivation.request);
 
-  tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+  const initialTrayImage = trayIcon(false);
+  tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform());
+  if (appBrand.development && process.platform === 'darwin') {
+    logInfo(`branding: tray image=${JSON.stringify(path.join(app.getAppPath(), 'artwork', 'trayTemplate.png'))}; template=${initialTrayImage.isTemplateImage()}; size=${JSON.stringify(initialTrayImage.getSize())}`);
+  }
   tray.on('click', windowActivation.request);
   refreshTray();
   // Electron 44 exposes setToolTip only. Record the actual capability and setter value;

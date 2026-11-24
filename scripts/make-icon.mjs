@@ -379,7 +379,7 @@ for (const size of EXTENSION_SIZES) {
 console.log(`Wrote extension/icons/icon{${EXTENSION_SIZES.join(',')}}.png`);
 
 // Complete review sizes, plus a larger transparent ferro for the 16px macOS tray.
-// The template excludes the teal tile and uses the same original white silhouette.
+// The template excludes the teal tile and uses a black silhouette with alpha.
 const reviewDir = path.join(root, 'build', 'icons');
 mkdirSync(reviewDir, { recursive: true });
 const ferroMask = Uint8Array.from(visibleSource, (visible, index) =>
@@ -389,13 +389,17 @@ const ferroCrop = sourceCrop(ferroMask);
 // silhouette to the pixel grid: six one-pixel teeth with one-pixel gaps, a curved
 // crest, rear blade and turned foot. Retina doubles this same grid, not its blur.
 function trayTemplate(size) {
-  if (size !== 16 && size !== 32) return render(size, ferroMask, ferroCrop);
+  if (size !== 16 && size !== 32) {
+    const pixels = render(size, ferroMask, ferroCrop);
+    for (let at = 0; at < pixels.length; at += 4) pixels.fill(0, at, at + 3);
+    return pixels;
+  }
   const rows = [[10, 12], [8, 11], [6, 10], [7, 10], [4, 10], [8, 10],
     [4, 13], [8, 10], [4, 10], [8, 10], [4, 9], [8, 9], [4, 9], [7, 9], [4, 8], [6, 7]];
   const scale = size / 16, pixels = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
     const [left, right] = rows[Math.floor(y / scale)];
-    for (let x = left * scale; x < (right + 1) * scale; x++) pixels.fill(255, (y * size + x) * 4, (y * size + x + 1) * 4);
+    for (let x = left * scale; x < (right + 1) * scale; x++) pixels[(y * size + x) * 4 + 3] = 255;
   }
   return pixels;
 }

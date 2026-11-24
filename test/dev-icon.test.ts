@@ -31,31 +31,34 @@ it('generates every review size, Retina tray templates and all existing icon out
     expect(bmp.readInt32LE(22)).toBe(height);
     expect(bmp.includes(Buffer.from([66, 62, 18])), `${file}: current teal branding`).toBe(true);
   }
-  // The generated source is RGBA/filter-0: template pixels must be white or transparent,
+  // The generated source is RGBA/filter-0: template pixels must be black or transparent,
   // not a teal tile masquerading as a macOS template image.
-  const png = readFileSync(path.join(root, 'artwork/trayTemplate.png'));
-  const chunks: Buffer[] = [];
-  for (let offset = 8; offset < png.length;) {
-    const length = png.readUInt32BE(offset);
-    if (png.toString('ascii', offset + 4, offset + 8) === 'IDAT') chunks.push(png.subarray(offset + 8, offset + 8 + length));
-    offset += length + 12;
-  }
-  const pixels = inflateSync(Buffer.concat(chunks));
-  let visible = 0, transparent = 0;
-  for (let y = 0; y < 16; y++) {
-    expect(pixels[y * 65]).toBe(0);
-    for (let x = 0; x < 16; x++) {
-      const at = y * 65 + 1 + x * 4;
-      if (pixels[at + 3]) {
-        visible++;
-        expect([...pixels.subarray(at, at + 3)]).toEqual([255, 255, 255]);
-      } else transparent++;
+  for (const size of [16, 32]) {
+    const png = readFileSync(path.join(root, `artwork/trayTemplate${size === 32 ? '@2x' : ''}.png`));
+    const chunks: Buffer[] = [];
+    for (let offset = 8; offset < png.length;) {
+      const length = png.readUInt32BE(offset);
+      if (png.toString('ascii', offset + 4, offset + 8) === 'IDAT') chunks.push(png.subarray(offset + 8, offset + 8 + length));
+      offset += length + 12;
     }
-  }
-  expect(visible).toBeGreaterThan(30);
-  expect(transparent).toBeGreaterThan(30);
-  for (let y = 4; y <= 14; y += 2) {
-    expect(pixels[y * 65 + 1 + 4 * 4 + 3], `tooth at ${y}`).toBe(255);
-    expect(pixels[(y + 1) * 65 + 1 + 4 * 4 + 3], `gap after ${y}`).toBe(0);
+    const pixels = inflateSync(Buffer.concat(chunks));
+    const stride = size * 4 + 1, scale = size / 16;
+    let visible = 0, transparent = 0;
+    for (let y = 0; y < size; y++) {
+      expect(pixels[y * stride]).toBe(0);
+      for (let x = 0; x < size; x++) {
+        const at = y * stride + 1 + x * 4;
+        if (pixels[at + 3]) {
+          visible++;
+          expect([...pixels.subarray(at, at + 3)]).toEqual([0, 0, 0]);
+        } else transparent++;
+      }
+    }
+    expect(visible).toBeGreaterThan(30);
+    expect(transparent).toBeGreaterThan(30);
+    for (let y = 4; y <= 14; y += 2) {
+      expect(pixels[y * scale * stride + 1 + 4 * scale * 4 + 3], `${size}px tooth at ${y}`).toBe(255);
+      expect(pixels[(y + 1) * scale * stride + 1 + 4 * scale * 4 + 3], `${size}px gap after ${y}`).toBe(0);
+    }
   }
 });

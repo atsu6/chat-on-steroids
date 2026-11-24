@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { transformSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { load as loadYaml } from 'js-yaml';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -96,6 +99,22 @@ it('logs real before/after userData and the native tooltip getter capability', (
   expect(source).toContain("unchanged=${userData === app.getPath('userData')}");
   expect(source).toContain("JSON.stringify(getToolTip.call(tray)) : 'unavailable'");
   expect(source).toContain('configured=${JSON.stringify(mainText(appBrand.displayName))}');
+});
+
+it('loads the generated dedicated macOS tray file and marks the NativeImage as a template', () => {
+  const source = read('src/main/index.ts');
+  const image = { setTemplateImage: vi.fn() };
+  const createFromPath = vi.fn(() => image);
+  const trayFunction = source.slice(source.indexOf('function trayIcon('), source.indexOf('\nfunction refreshTray('));
+  const script = transformSync(trayFunction, { loader: 'ts' }).code;
+  expect(vm.runInNewContext(`${script}\ntrayIcon(false)`, {
+    appBrand: { development: true }, process: { platform: 'darwin' }, path,
+    app: { getAppPath: () => '/checkout' }, nativeImage: { createFromPath }
+  })).toBe(image);
+  expect(createFromPath).toHaveBeenCalledWith('/checkout/artwork/trayTemplate.png');
+  expect(image.setTemplateImage).toHaveBeenCalledWith(true);
+  expect(source).toContain('tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform())');
+  expect(source).toContain('template=${initialTrayImage.isTemplateImage()}');
 });
 
 it('keeps profile/package identities independent of display branding', () => {
