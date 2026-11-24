@@ -17,9 +17,10 @@ wait({ms}) -> 作業タブで指定ms待つ。上限10000ms
 activate() -> 作業タブをアクティブにする`;
 
 function buildTurn(instruction, toolResult) {
-  let turn = CONTRACT + '\n---\n指示: ' + instruction;
+  const cleanNul = text => text.replace(/\0/g, ' ');
+  let turn = cleanNul(CONTRACT + '\n---\n指示: ' + instruction);
   if (toolResult !== undefined) {
-    turn += '\n前のツール結果: ' + JSON.stringify(toolResult);
+    turn += '\n前のツール結果: ' + JSON.stringify(toolResult, (_key, value) => typeof value === 'string' ? cleanNul(value) : value);
   }
   return turn;
 }
@@ -48,7 +49,7 @@ function createAgent(sendViaUi) {
     let parsed = parseAction(raw);
     if (parsed === null) {
       beforeRetry();
-      raw = await sendViaUi(buildTurn(instruction, 'JSONのみで再出力してください。'));
+      raw = await sendViaUi(buildTurn(instruction, toolResult) + '\n今すぐ実行してください。JSONのみで再出力してください。');
       parsed = parseAction(raw);
     }
     if (parsed === null) throw new Error('エージェントの応答を JSON として解析できませんでした。');

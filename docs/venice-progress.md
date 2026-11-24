@@ -1,6 +1,6 @@
 # Venice 移植キュー
 
-0〜4は完了。次は **5: write_stdin**。5以降は未着手。
+0〜4は完了。追加の **4.5: attestation輸送は保留**。5以降は未着手。
 
 | 状態（番号・項目） | 根拠commit | 残作業 |
 | --- | --- | --- |
@@ -9,6 +9,7 @@
 | 2. Electron read E2E — 完了 | `26188ebf`, `d2e9c4c6` | なし |
 | 3. apply_patch — 完了 | `c3137481`, `063e6cb9` | なし（全体 516 passed / 0 failed） |
 | 4. exec_command — 完了 | `eba8035a`, `969752ce`, `ab7dd7a8`, `0c3fb4fd` | なし（追加20件成功。全体の失敗と切り分けは下記） |
+| 4.5. attestation輸送 — 保留 | 補助修正のみ `1ee5c67a` | 輸送本体・認証取得・401/403後の自動再送・実fetchのConsole手順は未実装。NUL除去と計画だけの応答への1回再試行のみ完了。詳細は `venice-attestation-status.md` |
 | 5. write_stdin — 未着手 | — | run所有権を使うstdin/poll接続。2.1.55 が出ていれば先にマージする |
 | 6. find — 未着手 | — | 検索接続 |
 | 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
