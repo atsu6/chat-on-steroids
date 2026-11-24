@@ -10291,6 +10291,9 @@ export function initVeniceGrantDialog(): void {
     document.getElementById('veniceGrantProject')!.textContent = next.project ? `${next.project.name} · ${next.project.id}` : document.getElementById('veniceGrantUnassigned')!.textContent;
     document.getElementById('veniceGrantTab')!.textContent = `${next.tab.url} · tab ${next.tab.id}`;
     document.getElementById('veniceGrantInstruction')!.textContent = next.instructionSummary;
+    const find = next.tools?.length === 2;
+    document.getElementById('veniceGrantReadTools')!.hidden = find;
+    document.getElementById('veniceGrantFindTools')!.hidden = !find;
     const roots = document.getElementById('veniceGrantRoots')!;
     roots.replaceChildren(...next.roots.map(path => {
       const row = document.createElement('li'); row.textContent = path; return row;

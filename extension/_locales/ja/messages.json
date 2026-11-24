@@ -1230,5 +1230,8 @@
   "venice_patch_full_diff": {"message": "差分の全文を表示"},
   "venice_exec_running": {"message": "実行中"},
   "venice_exec_output_omitted": {"message": "省略：出力は先頭64KBまで表示します。"},
-  "venice_exec_output_error": {"message": "出力を取得できませんでした。停止ボタンでrunを終了できます。"}
+  "venice_exec_output_error": {"message": "出力を取得できませんでした。停止ボタンでrunを終了できます。"},
+  "venice_find_results": {"message": "検索結果"},
+  "venice_find_empty": {"message": "一致なし"},
+  "venice_find_truncated": {"message": "打ち切り：検索範囲を絞るか、max_resultsを増やしてください。"}
 }
