@@ -4,15 +4,22 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
+const {worker} = require('./venice-bridge-harness.cjs');
 const root = path.resolve(__dirname, '..');
 (async () => {
   const browser = await chromium.launch({headless: true,
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+  const cleanups = [];
   try {
     const context = await browser.newContext({viewport: {width: 1280, height: 900}, colorScheme: 'light', serviceWorkers: 'block'});
     const routed = [];
-    await context.route('**/*', route => {
+    const messages = [], h = worker({after: fn => cleanups.push(fn)});
+    await context.route('**/*', async route => {
       routed.push(route.request().url());
+      if (route.request().url() === 'https://venice.ai/synthetic-rpc') {
+        const message = route.request().postDataJSON(); messages.push(message);
+        return route.fulfill({contentType: 'application/json', body: JSON.stringify(await h.send(message))});
+      }
       if (route.request().url() === 'https://venice.ai/synthetic-panel') return route.fulfill({
         contentType: 'text/html; charset=utf-8', body: `<!doctype html><html lang="ja"><title>Venice panel synthetic check</title>
         <style>body{margin:0;background:#f4f4f5;color:#171717;font:16px/1.7 system-ui,sans-serif}main{padding:64px;max-width:760px}p{color:#5d5d5d}button,textarea,input{font-size:48px!important;background:magenta!important}*{box-sizing:border-box}</style>
@@ -38,7 +45,9 @@ const root = path.resolve(__dirname, '..');
     const {frameTree} = await cdp.send('Page.getFrameTree');
     const {executionContextId} = await cdp.send('Page.createIsolatedWorld', {frameId: frameTree.frame.id, worldName: 'venice-panel-synthetic'});
     const injection = await cdp.send('Runtime.evaluate', {contextId: executionContextId,
-      expression: fs.readFileSync(path.join(root, 'extension/venice-panel.js'), 'utf8')});
+      expression: `const chrome={runtime:{sendMessage:async message=>(await fetch('https://venice.ai/synthetic-rpc',{method:'POST',body:JSON.stringify(message)})).json()}};\n` +
+        fs.readFileSync(path.join(root, 'extension/venice-bridge.js'), 'utf8') + '\n' +
+        fs.readFileSync(path.join(root, 'extension/venice-panel.js'), 'utf8')});
     assert.equal(injection.exceptionDetails, undefined);
     const isolated = await cdp.send('Runtime.evaluate', {contextId: executionContextId, expression: 'typeof window.__cosVeniceAgent'});
     assert.equal(isolated.result.value, 'undefined'); // The UI truly cannot read MAIN's object.
@@ -51,7 +60,8 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.evaluate(() => window.syntheticSends), 3);
     assert.equal(await panel.locator('#instruction').evaluate(el => getComputedStyle(el).fontSize), '14px');
     assert.notEqual(await panel.locator('#instruction').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 0, 255)');
-    const screenshots = path.join(root, 'docs/screenshots');
+    const screenshots = path.join(root, 'outputs/venice-panel');
+    fs.mkdirSync(screenshots, {recursive: true});
     await page.screenshot({path: path.join(screenshots, 'venice-panel-desktop.png')});
     await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
     const accessibility = await page.evaluate(async () => (await axe.run(document.getElementById('cos-venice-panel'))).violations.map(v => ({id: v.id, impact: v.impact})));
@@ -82,7 +92,8 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.evaluate(() => window.syntheticSends), 4);
     assert.equal(await panel.locator('li').count(), 0);
     assert.deepEqual(errors, []);
-    assert.deepEqual(routed, ['https://venice.ai/synthetic-panel']);
+    assert.deepEqual(routed, ['https://venice.ai/synthetic-panel', ...Array(4).fill('https://venice.ai/synthetic-rpc')]);
+    assert.deepEqual(messages.map(message => message.op), ['localDocument', 'requestGrant', 'requestGrant', 'revokeLocal']);
     console.log('Passed: separate MAIN/ISOLATED worlds; run/progress/stop/collapse; hostile page CSS; 1280px/light and 390px/dark; axe; zero network forwarding.');
-  } finally { await browser.close(); }
+  } finally { for (const close of cleanups) close(); await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

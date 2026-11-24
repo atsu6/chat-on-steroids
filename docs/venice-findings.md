@@ -2038,6 +2038,7 @@ delta のキーは `sequence_number / response_id / item_id / output_index / con
 #### 2. 実行時の画像・Tray・readyを記録
 
 `src/main/index.ts`の既存Tray初期化にdev/macOS限定の構造化ログを追加した。
+この時点ではdevで既定出力だったが、現行の出力条件は後続「ブランディングのクローズ前確認」の明示フラグ方式に変更した。
 実パッケージの実行ファイルをターミナルから`COS_DEV_BRAND=1`、8767、隔離profileで起動した結果は次のとおり。
 
 | フィールド | 実測値 |
@@ -2104,3 +2105,69 @@ secondary instance / 終了中のbootstrapを止める既存ガードと、終�
 
 - 同様の確認では、成果物の配置と実行時ログに加え、対象PID・ディスプレイのグローバル座標・アクティブ状態を揃える。
   setter値だけでtooltipの目視確認を代用しない。
+
+## 2026-11-24 — ブランディングのクローズ前確認
+
+### 分かったこと
+
+#### 1. 診断はdevの明示フラグで1行だけ
+
+- 起動時のuserData、画像、存在しないtooltip getterについて分散していた診断を、1行の構造化ログへ統合した。
+  出力条件は`appBrand.development && COS_TRAY_DIAGNOSTICS === '1' && darwin`。
+  通常のprodではフラグを指定しても出ず、devも既定は出さない。パスの追加probeも同じ条件内だけで実行する。
+- mainのフラグ定義に、native描画の切り分け用に残す理由を1行コメントで記載した。
+  再現する場合だけ、dev起動へ`COS_TRAY_DIAGNOSTICS=1`を付ける。
+  パッケージのdev確認は従来の`COS_DEV_BRAND=1`に加えてこの診断フラグも必要。
+  `configuredTooltip`はsetterへ渡す値であり、nativeのgetter値と混同しない。
+- prodとdevの既定OFF、prodでのフラグ拒否、devの明示ON、1行だけの出力、OFF時に追加画像probeを実行しないことを回帰テストで固定した。
+
+#### 2. outputsは非管理・既存ignoreで除外
+
+- `git ls-files -- outputs/`は0件。
+  `.gitignore`のルート規則`/outputs/`（48行）が`tray-runtime-diagnosis/`、そのJSONとuserData、今回の`brand-closeout/`も除外する。
+  既存規則で十分なので重複するignoreは追加していない。
+- 古いパネルvisual scriptが再実行のたびに追跡済みのdocs画像を上書きする経路も、`outputs/venice-panel/`へ変更した。
+  既存の合成docs画像は保存資料として維持し、今回生成した画像と診断ファイルはコミットしない。
+
+#### 3. 全体テスト1回と追加の検証
+
+- 診断ガードと回帰テストを反映したNode 22.23.5の全体`npm test`は1回だけ実行し、終了コード0。
+  **テスト：12,865 passed / 0 failed / 218 skipped。ファイル：525 passed / 0 failed / 20 skipped。**
+  根拠: `outputs/brand-closeout/full-test.log` / `full-test.exit`。
+- 型チェックとbuildも成功した。同ディレクトリの`typecheck.log` / `typecheck.exit`、`build.log` / `build.exit`が根拠。
+- 以下のレビューで修正した3ファイルはVitest対象外のCJSだけで、全体実行後の製品コードとVitestテストは変更していない。
+  既存の関連CJS 6ファイルは**100 passed / 0 failed / 0 skipped**。
+  パネルのheadless検証も完了・停止・折り畳み・MAIN/ISOLATED分離・明暗desktop/mobile・axe・外部送信ゼロが成功し、生成画像も確認した。
+  根拠: `cjs-regression.log` / `cjs-regression.exit`、`panel-visual.log` / `panel-visual.exit`。
+
+#### 4. v2.1.55との差分棚卸し
+
+- 対象は133ファイル。既存Venice基盤116ファイルは読み取り専用Goose（codex-acp/current）、
+  後続brandingとクローズ前の修正は親Codexで分担した。
+  保存文書は来歴とコピー元との差分、英語のキー＝値エントリはデータ照合で確認し、同一本文の再精読とは区別した。
+  根拠: `outputs/brand-closeout/diff-review.json`、`venice-base-review.log`。
+- 英語12キーの不足という基盤レビューの指摘は、最終候補では既に2.1.55取り込み時に補完済みだった。
+  現行のカタログを巻き戻さず、履歴整理では非brandingの英語補完を基盤側へ収める。
+- 修正した追随漏れは、旧CJSのChatGPT登録期待、初期`localDocument`通知の欠落、`core/read`等を拒む名前の正規表現、
+  パネルvisual scriptのgrant接続不足だった。前者3件は修正前に35件中3失敗を実測した。
+  契約に合わせた厳密な通知列・登録ツール名・通信列のassertと、既存worker harnessへの接続で修正した。
+  検証の削除やskip、製品機能の巻き戻しはしていない。
+- 一時Tray、仮GUID、常時診断、無関係な整形、生成されたライセンス一覧の混入は残していない。
+  `git diff --check`も成功した。既存Veniceのread/write/exec/findと英語fallbackは意図した差分として保持する。
+
+#### 5. 履歴は基盤とbrandingの2コミットへ整理
+
+- `--no-ff`マージを含む作業履歴は、v2.1.55上の「既存Venice基盤」「devブランディング」の2コミットへsquashする。
+  基盤には上記CJSの追随修正と非brandingの英語補完も含め、後者を表示名・アイコン・その回帰確認へ限定する。
+  全部を1コミットに混ぜるより、将来brandingだけを上流用の別ブランチへ取り出しやすい。
+- 旧履歴はローカル`refs/backup/brand-dev-name-before-closeout`に保存する。
+  旧commit番号を記した過去の記録は、この保存履歴を参照できる。
+  `codex/venice-exec`の既存履歴は書き換えない。PR作成、mainへの切替、次のAPI疎通には着手しない。
+
+### 不明なこと
+
+- 上流へ提案するかどうかは未決定。このブランチ全体にはVenice基盤も含むため、表示名だけのPRとしてそのまま提出はしない。
+
+### 次に確認したいこと
+
+- step 0は完了。次の最小疎通とツール成功率の計測は、別途その作業が指示された範囲で実施する。

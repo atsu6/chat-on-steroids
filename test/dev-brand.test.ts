@@ -106,13 +106,13 @@ it.each([
   expect(source).toContain('onMainTextsChange(() => refreshNativeBrand(window))');
 });
 
-it('logs real before/after userData and the native tooltip getter capability', () => {
+it('keeps userData and configured-tooltip evidence in a single opt-in diagnostic', () => {
   const source = read('src/main/index.ts');
-  expect(source.indexOf('branding: userData before=')).toBeLessThan(source.indexOf('  refreshNativeBrand(window);'));
-  expect(source.indexOf('branding: userData after=')).toBeGreaterThan(source.indexOf('  refreshNativeBrand(window);'));
-  expect(source).toContain("unchanged=${userData === app.getPath('userData')}");
-  expect(source).toContain("JSON.stringify(getToolTip.call(tray)) : 'unavailable'");
-  expect(source).toContain('configured=${JSON.stringify(mainText(appBrand.displayName))}');
+  expect(source.match(/logInfo\(`branding:/g)).toHaveLength(1);
+  expect(source).toContain("userDataBefore: userData, userDataAfter: app.getPath('userData')");
+  expect(source).toContain('configuredTooltip: mainText(appBrand.displayName)');
+  expect(source).not.toContain('getToolTip');
+  expect(source.indexOf('  refreshNativeBrand(window);')).toBeLessThan(source.indexOf('branding: tray diagnostics='));
 });
 
 it('loads the generated dedicated macOS tray file and marks the NativeImage as a template', () => {
@@ -132,7 +132,7 @@ it('loads the generated dedicated macOS tray file and marks the NativeImage as a
   expect(image.addRepresentation).toHaveBeenCalledWith({ scaleFactor: 2, dataURL: `data:image/png;base64,${two.toString('base64')}` });
   expect(image.setTemplateImage).toHaveBeenCalledWith(true);
   expect(source).toContain('tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform())');
-  expect(source).toContain('template=${initialTrayImage.isTemplateImage()}');
+  expect(source).toContain('template: initialTrayImage.isTemplateImage()');
 });
 
 it('packages the canonical tray assets and prepares them for the existing dev entry point', () => {
@@ -149,18 +149,16 @@ it.each([false, true])('reports actual native image and tray state (empty/destro
   const source = read('src/main/index.ts');
   const startup = source.slice(source.indexOf('  const initialTrayImage = trayIcon(false);'), source.indexOf('  onStatusChange(refreshTray);'));
   const logs: string[] = [];
-  const bounds = { x: 100, y: 0, width: 24, height: 22 };
   const file = '/resources/icons/trayTemplate.png';
   const createFromPath = vi.fn(() => ({ isEmpty: () => !empty }));
   class NativeTray {
     on() {}
     isDestroyed() { return empty; }
-    getBounds() { return bounds; }
   }
   vm.runInNewContext(transformSync(`let tray;\n${startup}`, { loader: 'ts' }).code, {
-    appBrand: { development: true, displayName: name },
+    appBrand: { development: true, displayName: name }, brandDiagnosticsEnabled: true, userData: '/profile',
     process: { platform: 'darwin', resourcesPath: '/resources' },
-    app: { isPackaged: true, isReady: () => true, getAppPath: () => '/resources/app.asar' },
+    app: { isPackaged: true, isReady: () => true, getAppPath: () => '/resources/app.asar', getPath: () => '/profile' },
     appBrandAssetPath: () => file, existsSync: (path: string) => path === file,
     trayIcon: () => ({ isEmpty: () => empty, isTemplateImage: () => true, getSize: () => ({ width: 16, height: 16 }) }),
     Tray: NativeTray, nativeImage: { createFromPath }, trayGuidArgsForPlatform: () => [],
@@ -169,11 +167,39 @@ it.each([false, true])('reports actual native image and tray state (empty/destro
   });
   const prefix = 'branding: tray diagnostics=';
   expect(JSON.parse(logs.find(line => line.startsWith(prefix))!.slice(prefix.length))).toEqual({
+    userDataBefore: '/profile', userDataAfter: '/profile',
     imagePath: file, exists: true, fromPathEmpty: !empty, imageEmpty: empty, template: true,
     imageSize: { width: 16, height: 16 }, trayCreated: true, trayDestroyed: empty,
-    ready: true, packaged: true, resourcesPath: '/resources', appPath: '/resources/app.asar', bounds
+    ready: true, packaged: true, resourcesPath: '/resources', appPath: '/resources/app.asar', configuredTooltip: name
   });
+  expect(logs).toHaveLength(1);
   expect(createFromPath).toHaveBeenCalledWith(file);
+});
+
+it.each([
+  { development: false, flag: '', enabled: false },
+  { development: false, flag: '1', enabled: false },
+  { development: true, flag: '', enabled: false },
+  { development: true, flag: '0', enabled: false },
+  { development: true, flag: '1', enabled: true }
+])('gates native diagnostics for development=$development flag=$flag', ({ development, flag, enabled }) => {
+  const source = read('src/main/index.ts');
+  const declaration = source.match(/^const brandDiagnosticsEnabled = .*;$/m)![0];
+  const actual = vm.runInNewContext(`${declaration}\nbrandDiagnosticsEnabled`, {
+    appBrand: { development }, process: { env: { COS_TRAY_DIAGNOSTICS: flag } }
+  });
+  expect(actual).toBe(enabled);
+  if (enabled) return;
+  const startup = source.slice(source.indexOf('  const initialTrayImage = trayIcon(false);'), source.indexOf('  onStatusChange(refreshTray);'));
+  const createFromPath = vi.fn(), logInfo = vi.fn();
+  vm.runInNewContext(transformSync(`let tray;\n${startup}`, { loader: 'ts' }).code, {
+    brandDiagnosticsEnabled: actual, process: { platform: 'darwin' },
+    trayIcon: () => ({}), Tray: class { on() {} }, trayGuidArgsForPlatform: () => [],
+    windowActivation: { request: () => {} }, refreshTray: () => {},
+    nativeImage: { createFromPath }, logInfo
+  });
+  expect(logInfo).not.toHaveBeenCalled();
+  expect(createFromPath).not.toHaveBeenCalled();
 });
 
 it('keeps profile/package identities independent of display branding', () => {

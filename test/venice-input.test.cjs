@@ -104,7 +104,7 @@ test('wait rejects invalid durations before scheduling a timer', async t => {
 test('activate uses the existing background op and targets only the owned work tab', async t => {
   const h = agentHarness(t, {owned: true});
   assert.deepEqual(clone(await h.api.executeTool('activate')), {ok: true, result: {tabId: 2}});
-  assert.equal(h.runtimeMessages[0].op, 'activate');
+  assert.deepEqual(h.runtimeMessages.map(message => message.op), ['localDocument', 'activate']);
   assert.equal(h.tabs.get(2).active, true);
   assert.deepEqual(h.calls.map(call => clone(call)), [['update', 2, {active: true}]]);
   assert.equal(h.tabs.get(1).active, undefined);
@@ -128,12 +128,13 @@ test('CONTRACT lists each registered tool exactly once on its own line', t => {
   const contract = h.api.buildTurn('synthetic').split('\n---\n')[0];
   const lines = contract.split('利用可能なツール:\n')[1].split('\n');
   const names = lines.map(line => {
-    assert.match(line, /^[a-z_]+\(.*\) -> .+$/);
+    assert.match(line, /^(?:[a-z_]+\/)?[a-z_]+\(.*\) -> .+$/);
     return line.slice(0, line.indexOf('('));
   });
   assert.deepEqual(names, Object.keys(h.api.TOOL_REGISTRY));
   assert.equal(new Set(names).size, names.length);
   for (const name of ['fill', 'press', 'wait', 'activate']) assert.ok(names.includes(name));
+  for (const name of ['core/read', 'core/apply_patch', 'core/exec_command', 'core/find']) assert.ok(names.includes(name));
 });
 
 test('runTask executes input, key, wait and activation through the bridge', async t => {

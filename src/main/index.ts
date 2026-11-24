@@ -158,6 +158,8 @@ const MAIN_TEXTS_STATE = 'main-texts';
 let window: BrowserWindow | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
+// Native rendering diagnosis only: opt in with COS_TRAY_DIAGNOSTICS=1 on a dev-branded run.
+const brandDiagnosticsEnabled = appBrand.development && process.env.COS_TRAY_DIAGNOSTICS === '1';
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
@@ -505,9 +507,7 @@ void app.whenReady().then(async () => {
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
-  logInfo(`branding: userData before=${JSON.stringify(userData)}; ready=${app.isReady()}; packaged=${app.isPackaged}`);
   refreshNativeBrand(window);
-  logInfo(`branding: userData after=${JSON.stringify(app.getPath('userData'))}; unchanged=${userData === app.getPath('userData')}`);
   onMainTextsChange(() => refreshNativeBrand(window));
   // Display-only branding: never setName(), appId or userData for this development fork.
   if (appBrand.development && process.platform === 'darwin') {
@@ -876,26 +876,21 @@ void app.whenReady().then(async () => {
 
   const initialTrayImage = trayIcon(false);
   tray = new Tray(initialTrayImage, ...trayGuidArgsForPlatform());
-  if (appBrand.development && process.platform === 'darwin') {
-    logInfo(`branding: tray image=${JSON.stringify(appBrandAssetPath('icons/trayTemplate.png'))}; template=${initialTrayImage.isTemplateImage()}; size=${JSON.stringify(initialTrayImage.getSize())}`);
-  }
   tray.on('click', windowActivation.request);
   refreshTray();
-  if (appBrand.development && process.platform === 'darwin') {
+  if (brandDiagnosticsEnabled && process.platform === 'darwin') {
     const imagePath = appBrandAssetPath('icons/trayTemplate.png');
     logInfo(`branding: tray diagnostics=${JSON.stringify({
+      userDataBefore: userData, userDataAfter: app.getPath('userData'),
       imagePath, exists: existsSync(imagePath),
       fromPathEmpty: nativeImage.createFromPath(imagePath).isEmpty(),
       imageEmpty: initialTrayImage.isEmpty(), template: initialTrayImage.isTemplateImage(),
       imageSize: initialTrayImage.getSize(), trayCreated: true, trayDestroyed: tray.isDestroyed(),
       ready: app.isReady(), packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath, appPath: app.getAppPath(), bounds: tray.getBounds()
+      resourcesPath: process.resourcesPath, appPath: app.getAppPath(),
+      configuredTooltip: mainText(appBrand.displayName)
     })}`);
   }
-  // Electron 44 exposes setToolTip only. Record the actual capability and setter value;
-  // do not mistake this diagnostic for a native getter result.
-  const getToolTip = (tray as Tray & { getToolTip?: () => string }).getToolTip;
-  logInfo(`branding: tray.getToolTip=${typeof getToolTip === 'function' ? JSON.stringify(getToolTip.call(tray)) : 'unavailable'}; configured=${JSON.stringify(mainText(appBrand.displayName))}`);
   onStatusChange(refreshTray);
   // The built-in browser's own hooks live in its module, which loads only once it is selected.
   onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });

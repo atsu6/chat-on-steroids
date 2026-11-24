@@ -272,7 +272,7 @@ test('starting and exporting never sends network requests', async () => {
   assert.equal(capture.records.length, 0);
 });
 
-test('Venice injection is host-scoped, with unchanged ChatGPT content-script entries', () => {
+test('development injection is Venice-only and never hooks ChatGPT', () => {
   const native = () => Promise.resolve(new Response('unused'));
   const other = harness(native, 'https://chatgpt.com');
   assert.equal(other.window.fetch, native);
@@ -287,12 +287,8 @@ test('Venice injection is host-scoped, with unchanged ChatGPT content-script ent
   assert.deepEqual(venice[1], {matches: ['https://venice.ai/*'], js: ['venice-bridge.js'], world: 'ISOLATED', run_at: 'document_start'});
   assert.deepEqual(venice[2], {matches: ['https://venice.ai/*'], js: ['venice-panel.js'], world: 'ISOLATED', run_at: 'document_start'});
   const chatgpt = manifest.content_scripts.filter(entry => entry.matches.includes('https://chatgpt.com/*'));
-  assert.deepEqual(chatgpt, [
-    { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'],
-      js: ['i18n.js', 'chatgpt-dom.js', 'app-palette.js', 'content.js'], css: ['overlay.css'], run_at: 'document_idle' },
-    { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], js: ['fiber.js'], world: 'MAIN', run_at: 'document_idle' },
-    { matches: ['https://chatgpt.com/*', 'https://chat.openai.com/*'], js: ['usage.js'], world: 'MAIN', run_at: 'document_start' }
-  ]);
+  assert.deepEqual(chatgpt, []);
+  assert.deepEqual([...new Set(manifest.content_scripts.flatMap(entry => entry.matches))], ['https://venice.ai/*']);
 });
 
 test('chatProgress ignores helper requests and reports only the latest chat record', async () => {
