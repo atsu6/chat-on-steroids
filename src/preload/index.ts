@@ -126,6 +126,16 @@ const api = {
     ipcRenderer.on('venice:grantPending', wrapped);
     return () => ipcRenderer.removeListener('venice:grantPending', wrapped);
   },
+  onVeniceFocusApproval: (listener: (id: string) => void): (() => void) => {
+    const wrapped = (_event: unknown, id: string): void => listener(id);
+    ipcRenderer.on('venice:focusApproval', wrapped);
+    return () => ipcRenderer.removeListener('venice:focusApproval', wrapped);
+  },
+  onVeniceOpenSession: (listener: (id: string) => void): (() => void) => {
+    const wrapped = (_event: unknown, id: string): void => listener(id);
+    ipcRenderer.on('venice:openSession', wrapped);
+    return () => ipcRenderer.removeListener('venice:openSession', wrapped);
+  },
   debugVeniceGrant: (payload: { action: 'grant'; sessionId: string; roots: string[];
     sender: { browserId: string; tabId: number; documentId: string } } | { action: 'revoke'; runId: string }) =>
     call<{ runId?: string; revoked?: boolean }>('venice:debugGrant', payload),

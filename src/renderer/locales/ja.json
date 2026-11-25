@@ -4054,5 +4054,6 @@
   "Reported by the Venice page": "Veniceページからの報告",
   "Page report truncated at 64,000 characters.": "ページからの報告は64,000文字まで記録しています。",
   "Succeeded": "成功",
-  "Run permission was revoked. No further steps will run.": "runの許可が失効しました。次のステップは実行しません。"
+  "Run permission was revoked. No further steps will run.": "runの許可が失効しました。次のステップは実行しません。",
+  "Venice is waiting for folder approval.": "Veniceがフォルダーの承認を待っています。"
 }

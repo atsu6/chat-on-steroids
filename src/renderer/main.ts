@@ -96,6 +96,11 @@ const scheduled = initScheduled({
 api.onSessionChanged(() => {
   if (document.querySelector('.panel[data-panel="scheduled"]')?.classList.contains('is-active')) void scheduled.refresh();
 });
+api.onVeniceOpenSession?.(id => {
+  showTab('chat');
+  openChatView('timeline');
+  void openScheduledChat(id);
+});
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initDesktopAskNotice(api);

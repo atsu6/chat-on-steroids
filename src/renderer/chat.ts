@@ -10330,9 +10330,15 @@ export function initVeniceGrantDialog(): void {
   const write = document.getElementById('veniceGrantWrite') as HTMLInputElement;
   const shell = document.getElementById('veniceGrantShell') as HTMLInputElement;
   let current: VeniceGrantPending | null = null, busy = false;
+  let preferredId: string | null = null, pendingRows: VeniceGrantPending[] = [];
   const sync = (): void => { pick.disabled = busy; write.disabled = busy; shell.disabled = busy; deny.disabled = busy; allow.disabled = busy || !current?.roots.length; };
   const paint = (pending: VeniceGrantPending[]): void => {
-    const next = pending[0] ?? null;
+    pendingRows = pending;
+    if (preferredId && !pending.some(row => row.id === preferredId)) preferredId = null;
+    // A notification may select a particular request, but never interrupt a native folder picker.
+    const next = (busy && current ? pending.find(row => row.id === current?.id) : null)
+      ?? pending.find(row => row.id === preferredId) ?? pending[0] ?? null;
+    const changed = next?.id !== current?.id;
     if (next?.id !== current?.id) { busy = false; error.hidden = true; write.checked = false; shell.checked = false; }
     current = next;
     if (!next) { if (dialog.open) dialog.close(); return; }
@@ -10350,6 +10356,7 @@ export function initVeniceGrantDialog(): void {
     document.getElementById('veniceGrantEmpty')!.hidden = next.roots.length > 0;
     sync();
     if (!dialog.open) { dialog.showModal(); deny.focus(); }
+    else if (changed) deny.focus();
   };
   const act = async (kind: 'pick' | 'allow' | 'deny'): Promise<void> => {
     const id = current?.id;
@@ -10361,13 +10368,18 @@ export function initVeniceGrantDialog(): void {
       if (kind === 'pick' && reply.ok) paint(reply.data as VeniceGrantPending[]);
     } catch {
       if (current?.id === id) { error.textContent = document.getElementById('veniceGrantActionError')!.textContent; error.hidden = false; }
-    } finally { if (current?.id === id) { busy = false; sync(); } }
+    } finally { if (current?.id === id) { busy = false; paint(pendingRows); } }
   };
   pick.addEventListener('click', () => void act('pick'));
   allow.addEventListener('click', () => void act('allow'));
   deny.addEventListener('click', () => void act('deny'));
   dialog.addEventListener('cancel', event => { event.preventDefault(); void act('deny'); });
   api.onVeniceGrantPending?.(paint);
+  api.onVeniceFocusApproval?.(id => {
+    if (!pendingRows.some(row => row.id === id)) return;
+    preferredId = id;
+    if (!busy) paint(pendingRows);
+  });
   void api.veniceGrantPending?.().then(reply => { if (reply.ok && Array.isArray(reply.data)) paint(reply.data); });
 }
 

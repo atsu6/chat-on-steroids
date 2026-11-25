@@ -4139,5 +4139,6 @@
   "Reported by the Venice page": "Reported by the Venice page",
   "Page report truncated at 64,000 characters.": "Page report truncated at 64,000 characters.",
   "Succeeded": "Succeeded",
-  "Run permission was revoked. No further steps will run.": "Run permission was revoked. No further steps will run."
+  "Run permission was revoked. No further steps will run.": "Run permission was revoked. No further steps will run.",
+  "Venice is waiting for folder approval.": "Venice is waiting for folder approval."
 }

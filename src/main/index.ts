@@ -1,4 +1,5 @@
 import { veniceToolGateway } from './venice-tool-gateway.js';
+import { createVeniceNotifications, openVeniceNotification } from './venice-notifications.js';
 import { appBrand, appBrandAssetPath, refreshNativeBrand } from './app-brand.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
@@ -671,6 +672,28 @@ void app.whenReady().then(async () => {
   });
   turnNotifier.seed(await listSessions().catch(() => []));
   onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
+  veniceToolGateway.setNotifications(createVeniceNotifications({
+    session: getSessionOrNullIfMissing,
+    pending: () => veniceToolGateway.pendingApprovals(),
+    enabled: () => getConfig().ui.turnNotifications !== false,
+    supported: () => Notification.isSupported(),
+    focused: () => window?.isFocused() === true,
+    now: Date.now,
+    sound: soundCue,
+    phone: pushToPhone,
+    failed: () => logWarn('Venice notification: delivery failed'),
+    show: (title, body, click) => {
+      const notice = new Notification({ title, body });
+      notice.on('click', click);
+      notice.on('failed', () => logWarn('Venice notification: the operating system refused the notice'));
+      finishedNoticeRetention.retain(notice);
+      notice.show();
+    },
+    open: (sessionId, approvalId) => {
+      showWindow();
+      if (window) openVeniceNotification(window.webContents, sessionId, approvalId, () => veniceToolGateway.pendingApprovals());
+    }
+  }));
   // #1826: scheduled runs. Checked every 30 s and right after the computer wakes; a run missed
   // while it slept or the app was closed goes out once, labelled late.
   const scheduleDeps: RunnerDeps = {

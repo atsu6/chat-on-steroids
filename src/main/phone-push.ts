@@ -22,6 +22,8 @@ export type PhonePushKind = 'needs-you' | 'failed' | 'finished';
 
 export interface PhonePushEvent {
   kind: PhonePushKind;
+  /** Venice has no ChatGPT URL, approval-card action or Telegram steering target. */
+  provider?: 'venice';
   /** An approval card this chat waits on: Telegram offers Deny under it (#1934). */
   approval?: { sessionId: string; cardId: string };
   sessionId?: string;
@@ -88,7 +90,9 @@ export function createPhonePush(deps: PhonePushDeps) {
   const sentTimes: number[] = [];
 
   const message = (event: PhonePushEvent, details: boolean): { title: string; message: string; click?: string } => {
-    const title = details && event.chatTitle ? oneLine(event.chatTitle, 80) : 'Chat On Steroids';
+    const title = details && event.chatTitle ? oneLine(event.chatTitle, 80) : event.provider === 'venice' ? mainText('Chat On Venice') : 'Chat On Steroids';
+    if (event.provider === 'venice') return { title, message: mainText(event.kind === 'finished'
+      ? 'Venice task completed' : event.kind === 'failed' ? 'Venice task failed' : 'Venice is waiting for folder approval.') };
     let text: string;
     if (event.kind === 'needs-you') text = mainText('A chat is waiting for you.');
     else if (event.kind === 'failed') text = oneLine(event.detail ?? mainText('Something failed in Chat On Steroids.'), 240);
@@ -169,10 +173,10 @@ export function createPhonePush(deps: PhonePushDeps) {
       const viaTelegram = telegram ? (async () => {
         const text = [shown.title === 'Chat On Steroids' ? '' : shown.title, shown.message, shown.click ?? ''].filter(Boolean).join('\n');
         // About which chat, so a reply acts on it; Deny under an approval (#1934, phase 2 2026-10-31).
-        const approval = event.kind === 'needs-you' ? event.approval : undefined;
-        const sessionId = approval?.sessionId ?? event.sessionId;
+        const approval = event.provider !== 'venice' && event.kind === 'needs-you' ? event.approval : undefined;
+        const sessionId = event.provider === 'venice' ? undefined : approval?.sessionId ?? event.sessionId;
         const sent = await telegram.send(text, sessionId ? { sessionId, ...(approval ? { cardId: approval.cardId } : {}) } : undefined).catch(() => false);
-        deps.log(sent ? `phone push: sent "${name}" to Telegram${event.approval && event.kind === 'needs-you' ? ' with Deny' : ''}` : `phone push: "${name}" did not reach Telegram`);
+        deps.log(sent ? `phone push: sent "${name}" to Telegram${approval ? ' with Deny' : ''}` : `phone push: "${name}" did not reach Telegram`);
         return sent;
       })() : Promise.resolve(null);
       const [byNtfy, byTelegram] = await Promise.all([viaNtfy, viaTelegram]);

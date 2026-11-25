@@ -11,6 +11,7 @@ import { getSession } from './session/store.js';
 import { createRegistrar, shieldSessionToolOutput } from './mcp/kernel.js';
 import { registerCoreTools } from './mcp/tools-core.js';
 import { VeniceExecRuns, boundVeniceExecOutput, type VeniceExecLease } from './venice-exec.js';
+import { logWarn } from './logger.js';
 
 export const veniceSenderSchema = z.object({
   browserId: z.string().regex(/^[a-z0-9]{16,64}$/),
@@ -67,6 +68,9 @@ export class VeniceToolGateway {
   private historyWrites: Promise<void> = Promise.resolve();
   private historyFailure: unknown = null;
   private historyEvents = new Map<string, Map<string, VeniceRunEvent>>();
+  private notifications: { run(grant: VeniceRunGrant, event: VeniceRunEvent): void; approvals(rows: VeniceGrantPending[]): void } | null = null;
+
+  setNotifications(observer: NonNullable<VeniceToolGateway['notifications']>): void { this.notifications = observer; }
 
   private recordRun(grant: VeniceRunGrant, event: VeniceRunEvent): Promise<void> {
     const next = this.historyWrites.then(async () => {
@@ -82,6 +86,9 @@ export class VeniceToolGateway {
       }
       await this.deps.recordRun?.(grant, event);
       events.set(key, structuredClone(event));
+      // Delivery failure cannot undo a durable task result or make the page retry it.
+      try { this.notifications?.run(structuredClone(grant), structuredClone(event)); }
+      catch { logWarn('Venice notification: delivery failed'); }
     });
     this.historyWrites = next.catch(() => undefined);
     return next;
@@ -104,7 +111,11 @@ export class VeniceToolGateway {
   pendingApprovals(): VeniceGrantPending[] {
     return structuredClone([...this.approvals.values()].flatMap(row => row.view ? [row.view] : []));
   }
-  private publishApprovals(): void { this.approvalUi?.notify(this.pendingApprovals()); }
+  private publishApprovals(): void {
+    this.approvalUi?.notify(this.pendingApprovals());
+    try { this.notifications?.approvals(this.pendingApprovals()); }
+    catch { logWarn('Venice notification: delivery failed'); }
+  }
   private finishApproval(row: Approval, reply: VeniceGrantReply): void {
     if (!this.approvals.delete(row.id)) return;
     clearTimeout(row.timer); row.finish(reply); this.publishApprovals();
