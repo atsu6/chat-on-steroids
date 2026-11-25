@@ -2560,3 +2560,56 @@ rendererの既存上流カタログキーは削除・値変更とも0。拡張13
 - 検証時HEADはフォークab96dbbd、上流906666f2。今回の変更は文書の追記と現在方針の明確化だけで、履歴・CI・push条件・非名前の既存差分・テスト判定は変更しない。
 
 証跡: `outputs/dev-name-state-verification/`のverification.json／verification.md、constant.patch、app-brand-existing-non-name.patch、fork／upstreamのtests・typecheck・buildログとchecks.exit、electron-title.json／png。
+
+## 2026-11-25 — PR本文・保守コスト・画面確認の再現手順を確定
+
+### PR本文案の確認結果
+
+- `docs/upstream-dev-suffix-pr.md`を全文確認し、`Chat On Venice`は0件、英語のicon／iconsと日本語のアイコン記述も0件だった。
+  内容はdev接尾辞、パッケージ版のproductName/appId維持によるidentity／userData保持、macOSアプリメニュー名の3点だけ。
+- 上流906666f2の全追跡ファイルでもVenice製品名0件を再確認した。PRは作成せず、上流へpushしない。
+
+### 許容する上流同期コスト
+
+f8a37860時点の分類は32ファイル64行で、そのうち名前選択以外のフォーク固有データが63行だった。
+この件数は競合件数ではない。共有ファイルの同じキー・近傍を上流も更新したときにテキスト競合や意味の再確認が発生し得るため、次の維持コストを許容する。
+32ファイル全部が毎回必ず競合するわけではなく、フォーク専用の資料・fixture・資産が名前の出現を持つことだけで競合にはならない。
+
+| 共有面 | 許容する維持作業 |
+| --- | --- |
+| 基底名定数 | 上流同期後もフォークの1行差を維持する。dev判定と接尾辞合成式は共通のままにする |
+| app-brand.ts | 上流の表示処理更新を取り込みつつ、既存のnative画像パスとAboutアイコンを誤って落とさない |
+| rendererのja/enカタログ、MainText一覧、AppState型 | 上流キーを保持し、名前用のフォーク追加データと既存ツール文言を区別して解消する。enの包括的fallbackデータを縮めない |
+| 拡張の13カタログ | 上流の新キーを取り込み、フォークのextension_nameを維持する。これはElectronの基底名定数とは別surfaceの翻訳データ |
+| 共有のwindow-lifecycle fixture | フォーク表示名を渡すmockと期待値を対で維持する。productName/appIdの検証までフォーク表示名に変えない |
+
+名前の出現数を減らすための巻き戻しや、上流用ブランチへのフォーク資産追加はしない。取り込み時は、競合箇所の意味と既存の名前・識別子テストで判断する。
+
+### テストfixtureの分類を再点検した
+
+- f8a37860の分類一覧のうち、テスト内の7ファイル9ヒット行を原文で確認した。文字列snapshotファイルへのヒットは0件。
+- 共有ファイルは`test/window-lifecycle.test.ts:25,30`の2行だけで、appBrand mockとwindow title期待値を同じフォーク名にしている。
+  これは渡された表示名をウィンドウへ反映する検証であり、パッケージの製品識別子がSteroidsであることを検証するケースではない。
+- フォーク専用の`test/dev-brand.visual.cjs`と`test/i18n-english-fallback.test.ts`は表示名・翻訳仕様の入力と期待値。
+  `test/venice-apply-patch.visual.cjs`、`test/venice-exec.visual.cjs`、`test/venice-find.visual.cjs`、`test/venice-panel.visual.cjs`は外部通信を遮断した合成ページの見出しだった。
+- Steroidsであるべきものを誤ってVeniceと分類したケースは0件。`test/app-display-name.test.ts:89-90`と`test/dev-brand.test.ts:195-199`のpackage名・productName・appIdは引き続き既存のリテラルを直接比較している。
+
+### 実Electron画面確認を再実行する
+
+手動harnessはnpm test／CIの収集対象外。作業ルート、Node 22.23.5、導入済みのlockfile依存関係、macOSのGUIセッションを前提とする。
+通常のCoSや開発アプリを終了・再起動する必要はなく、検証用userDataと合成stateを使う。外部HTTP(S)を遮断し、Veniceへ送信しない。
+
+```sh
+cd /Users/atsu/chat-on-venice
+volta run --node 22.23.5 npm run build
+# harnessが無いcheckoutでは、下記の再現文書の復元ブロックを先に実行する。
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-verification/electron-title.cjs
+```
+
+`outputs/`はGit対象外のため、コマンドだけでは別checkoutにharnessが残らない。
+`docs/development-branding-runtime-check.md`へ、前提・復元を含む一連のコマンド・成功条件・検証済みharnessのソースそのものを保存した。
+文書から復元できる内容が実行済みのharnessと同一であることを確認した。実行コードは変更していない。
+結果は同じ出力先のelectron-title.json／pngで確認でき、成功後約20秒で検証ウィンドウだけが閉じる。
+
+今回は文書だけの更新なので、前回のテスト・typecheck・build・実画面の成功証跡を再利用した。実行したものとして新しいテスト件数を計上しない。
+今回の追記と再現文書内の名称は(b)文書データに分類し、既存の表示名選択やテストfixtureは変更しない。
