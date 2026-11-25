@@ -2484,3 +2484,79 @@ whats-new-dpr{1,2}-fixed.log、ferro-{targeted,typecheck,build,visual}.logとfer
   macOSメニューがcheckoutではElectron・packageでは本番名のまま残る点だけを記載した。アイコン変更は含めず、PRは作成していない。
 - 名前・その他の製品コード、CI workflow、push条件は変更していない。
   手順1の停止条件に当たったため、今回指定された両ブランチのテスト・typecheck・buildは未実行。過去の成功を今回の再実行として報告しない。
+
+
+## 2026-11-25 — 名前の状態比較を完了し、履歴再構成を不要と確定
+
+### 受け入れ方針と結果
+
+- 以前の「コミット対称性が未成立で停止」という記録は、当時の条件と判断の経緯として残す。70589d99は機能導入と定数ファイル新規作成を兼ねるので、独立renameの逆対が無いことは欠陥ではない。
+  今回は利用者の承認により、履歴再構成をせず現在の状態を比較する基準へ切り替えた。既存の共有ファイルの差分を名前だけに縮めることも要求しない。
+- 上流の基底名は`Chat On Steroids`、フォークは`Chat On Venice`。両定数にdev接尾辞はなく、定数ファイルの差分は1ファイル+1/-1だけ。
+- app-brand.tsの上流8-12行／フォーク9-13行にあるdev判定と接尾辞合成ブロックは、空白を含めて文字単位で同一。画像パス・About設定の既存差分は別扱いとした。
+- 全追跡ファイルの`Chat On Venice` grepは上流0件。フォークは32ファイル64行（79出現）で、(a)名前選択の定数1行、(b)説明できるフォーク固有データ63行、(c)説明不能0行。
+  (b)には共有ファイル内のカタログ／型／native翻訳キー、拡張の静的UI、合成fixture、文書を含む。デスクトップ表示名の選択ロジックとは区別した。
+
+### 全ヒットのファイル別分類
+
+全ハンク、ヒット行、原文は`outputs/dev-name-state-verification/verification.json`と同Markdown、`patches/`へ保存した。共有は同じパスが上流にもあることを示す。
+
+| ファイル | 分類 | 共有 | 正常扱いの理由 |
+| --- | --- | --- | --- |
+| `artwork/app-icon-source.svg` | b | forkのみ | SVG原本の非描画titleメタデータ。デスクトップ表示名の選択には使わない。 |
+| `docs/development-branding.md` | b | 共有 | フォーク用表示名・資産・確認方法の利用文書。PR本文とは別管理。 |
+| `docs/venice-adapter-contract.md` | b | forkのみ | フォーク専用の拡張パネルの操作説明。 |
+| `docs/venice-branch-scope.md` | b | forkのみ | フォークのブランチ範囲と過去の製品名変更の記録。 |
+| `docs/venice-findings.md` | b | forkのみ | 過去の実測・判断と今回の検証結果の記録。表示名ロジックではない。 |
+| `extension/_locales/de/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/en/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/es/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/fr/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/ja/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/ko/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/pt_BR/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/pt_PT/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/ru/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/tr/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/vi/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/zh_CN/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/_locales/zh_TW/messages.json` | b | 共有 | フォーク専用拡張のextension_name翻訳データ。manifestのロケール置換で使用し、Electron名の定数とは別surface。 |
+| `extension/venice-panel.js` | b | forkのみ | Venice専用パネルの見出し・aria-labelという静的UIデータ。Electronの表示名選択とは別surface。 |
+| `src/renderer/locales/en.json` | b | 共有 | フォーク表示名・Aboutの英語3項目と既存の完全英語fallbackデータ。大きい単一ハンクはJSONキー単位でも比較し、既存upstream3キーは同値保持。 |
+| `src/renderer/locales/ja.json` | b | 共有 | フォーク用表示名・Aboutの日本語カタログ3項目。読み書き・実行許可の既存翻訳とは別ハンク。 |
+| `src/renderer/main-texts.ts` | b | 共有 | 既存t()経路でnativeへ公開するフォーク用翻訳キー。別の名前選択はしない。 |
+| `src/shared/app-brand-name.ts` | a | 共有 | デスクトップ表示名を選択する唯一の基底名定数。 |
+| `src/shared/main-texts.ts` | b | 共有 | native翻訳公開を許可するフォーク用キー一覧。別の名前選択はしない。 |
+| `src/shared/types.ts` | b | 共有 | mainから届くフォーク表示名も許容するAppStateの型。実行時の選択処理ではない。 |
+| `test/dev-brand.visual.cjs` | b | forkのみ | フォークのdev/prod表示を検証する合成入力・期待値。 |
+| `test/i18n-english-fallback.test.ts` | b | forkのみ | フォーク用表示名の翻訳・fallback検証の入力と期待値。 |
+| `test/venice-apply-patch.visual.cjs` | b | forkのみ | フォーク専用の画面検証に使う合成ページの見出し。 |
+| `test/venice-exec.visual.cjs` | b | forkのみ | フォーク専用の画面検証に使う合成ページの見出し。 |
+| `test/venice-find.visual.cjs` | b | forkのみ | フォーク専用の画面検証に使う合成ページの見出し。 |
+| `test/venice-panel.visual.cjs` | b | forkのみ | フォーク専用の画面検証に使う合成ページの見出し。 |
+| `test/window-lifecycle.test.ts` | b | 共有 | 既存windowタイトル更新のフォーク名mockと期待値。 |
+
+### 共有ファイルの名前ハンクと非名前の既存差分
+
+| ファイル／ハンク | 内容と保持する理由 |
+| --- | --- |
+| app-brand.tsのimport追加と`@@ -11,9 +12,15 @@` | checkout／packageのnative画像パス解決とdev Aboutアイコン。表示名のdev判定／合成とは別で、追従9dd2aa89の親から同じ内容 |
+| ja.jsonの`@@ -1,6 +1,9 @@` | 名前・Aboutの3キーだけの追加 |
+| ja.jsonの`@@ -4002,5 +4005,43 @@` | 既存のread/write/shell/find承認文言。名前ハンクと分離して保持。上流4004キーを同値で残し、追加41キーのうち名前は3キー |
+| en.jsonの`@@ -1,5 +1,4132 @@` | 追従前からある包括的英語fallbackカタログ。上流の既存3キーは同値、追加4127キーのうち名前3キー。単一大ハンクのためJSONキー単位でも比較した |
+| renderer/main-texts.tsとshared/main-texts.tsの後方ハンク | 既存のChoose foldersというnativeフォルダー選択ラベル。名前3キーの追加ハンクとは分離して保持 |
+| extension/_localesの13ファイルの末尾ハンク | extension_name変更とは別の、既存のツール承認・検索・隔離警告文言。全13カタログは追従の親から同じ内容 |
+
+これらの製品コード／カタログは今回は変更しない。sharedHunkReviewには共有ファイルごとの全ハンクと、追従の親との内容比較、JSONキー追加／変更／削除を残した。
+rendererの既存上流カタログキーは削除・値変更とも0。拡張13カタログの既存キーで値が違うのは名前差分のextension_nameだけで、キー削除は0。
+
+### 実行時と検証
+
+- フォークの実Electron BrowserWindowで、nativeタイトル・rendererのdocument.title・可視ヘッダが`Chat On Venice (dev)`になったことを確認。実mainの合成モジュール、今回ビルドしたpreload／rendererを使用した。
+  userDataと他のstateは検証用に隔離し、外部ネットワークを遮断した。画面画像は`electron-title.png`、実行値と条件は`electron-title.json`に保存。通常のdevアプリやbridgeの二重起動ではない。
+- フォーク: branding対象9ファイル210 passed / 0 failed / 0 skipped。npm test入口のCJS6ファイルも100 passed / 0 failed / 0 skipped。typecheck・buildは終了コード0。
+- 上流906666f2: 対象7ファイル178 passed / 0 failed / 0 skipped。typecheck・buildは終了コード0。上流worktreeは未変更で、pushしない。
+- PR本文案はVenice製品名・アイコン記述0件。dev接尾辞、productName/appId据え置きの理由、native macOSメニュー名の3点だけを保持する。PRは作成しない。
+- 検証時HEADはフォークab96dbbd、上流906666f2。今回の変更は文書の追記と現在方針の明確化だけで、履歴・CI・push条件・非名前の既存差分・テスト判定は変更しない。
+
+証跡: `outputs/dev-name-state-verification/`のverification.json／verification.md、constant.patch、app-brand-existing-non-name.patch、fork／upstreamのtests・typecheck・buildログとchecks.exit、electron-title.json／png。

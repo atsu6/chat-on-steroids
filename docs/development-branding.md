@@ -7,7 +7,7 @@ The upstream candidate and the fork share the display-name binding. The upstream
 - `src/shared/app-brand-name.ts:2` defines the base display label. `src/main/app-brand.ts:9,12` alone selects development mode and adds `(dev)`; renderer title and header consume that choice through AppState and t/ui bindings.
 - Product name `Chat On Steroids` and app ID `com.chatonsteroids.app` stay unchanged so packaged installations retain their identity and user-data location. The development launch uses its explicit user-data path.
 - The native macOS app menu keeps its existing identity: `Electron` from a checkout and `Chat On Steroids` in a packaged build.
-- The one-line fork follow-up is `9dd2aa89`. Upstream `70589d99` introduces the display-name feature and the constant file; it is not a standalone inverse rename. The commit-pair symmetry check remains unresolved; see `venice-branch-scope.md`.
+- The one-line fork follow-up is `9dd2aa89`. Upstream `70589d99` introduces the display-name feature and the constant file; it is not a standalone inverse rename. The earlier commit-pair check is preserved as history. Acceptance now compares the current base-name values and the identical development/suffix block; no history reconstruction is required. See `venice-branch-scope.md`.
 
 ## Fork-specific presentation
 
