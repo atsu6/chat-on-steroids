@@ -2623,3 +2623,47 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
 - 候補差分のdocsはdevelopment-branding.mdの9行だけで、workflow・outputsの変更は0件。Venice固有機能やCI基盤の説明は含まれない。
 - PR本文は指定の3点を維持し、上流候補のtypecheck・build成功と対象178 passed / 0 failedの検証行だけを追加した。フォークの件数・アイコン・Venice固有機能は含めない。既存の上流検証ログを再利用し、新しいテスト実行とは扱わない。
 - PR本文全文と候補のdevelopment-branding.mdの+9ハンクを提示する段階で停止する。push・PR作成は行わない。
+
+## 2026-11-25 — write_stdinをrun所有のgatewayへ接続
+
+### 分かったこと
+
+- 実装commitは`1d1eb1bd`。作業は`/Users/atsu/chat-on-venice`の`codex/venice-foundation-and-branding`で行い、Node `v22.23.5`を確認した。
+  先に必要だった2.1.55の取込は完了済み。上流候補`codex/upstream-dev-suffix`は`906666f2`のまま変更していない。
+- 新しいshell grantに`core/write_stdin`を追加し、gateway・kernel・拡張service worker・MAINの許可リストを接続した。
+  初回の合成結合確認でservice worker側の未接続を検出して修正した。ローカルkernel単体の成功だけではパネルの経路を証明できない。
+- 通常のUnifiedExecProcessManagerのpipeはstdinを閉じて起動する。これを一律に開くと既存の終了条件が変わるため、
+  Veniceのgateway引数`stdin_open: true`を明示した場合だけ開く内部opt-inを追加した。通常CoSのschema・既定は変更していない。
+  stdout / stderrは分離したまま。閉じたstdinへの非空入力は拒否し、空pollは許可する。
+- 継続呼び出しはrunのleaseと既存managerの所有者を二重に照合する。別run・別document・未知のIDは入力も出力も拒否する。
+  interaction lock待ちで権限が変わる場合に備え、lock取得後にもlive grant / command permissionを検証する。
+  同じcallIdは台帳の応答を再取得するだけで入力を二度送らない。失効後の新規呼び出しと確定済み応答の再取得は区別する。
+- pipeにはTTYの制御文字処理がないため、Ctrl-Cは文字列として送らず既存のプロセスツリー割り込みを使う。
+  Stop / revoke / app終了のkillを引き継ぐ。終了済みプロセスへの非空入力は拒否し、出力が保持されている間は空pollで再取得できる。
+- 空pollは出力到着で早く返るため、最後のstdout / stderrと終了イベントが別の応答になることがある。
+  固定回数のpollで終了したと仮定せず、必要なら新しいcallIdでrunning:falseまで確認する。
+  既定10秒・最大30秒、空pollの最小待機枠5秒は既存managerに合わせた。
+- 戻り値のsnapshotは元のexec callIdを保持し、パネルの同じプロセス行へ累積出力を反映する。
+  継続のwire callIdとは別物である。既存secrets shield・64KiB上限・textContent・改行・横スクロールを再利用し、UIラベルは追加していない。
+
+### 検証結果
+
+- 追加は`test/venice-write-stdin.test.ts`の13件と`test/venice-write-stdin-panel.test.ts`の2件。
+  実kernel・一時フォルダー・実Nodeプロセス・認証HTTPでpoll / input / Ctrl-C / Stopを確認し、
+  shell同意、所有権、失効、二重送信防止、Read-only、待機中の権限変更、秘密値mask、出力上限も検証した。
+- 既存`test/venice-exec.test.ts`はshell grantのtool配列の期待値2箇所へ新しいtoolを追加しただけ。
+  テストの削除・skip追加・assert緩和はない。
+- 実装を固定して全体`npm test`を1回実行した。Vitestは**529 passed / 0 failed / 20 skipped（549ファイル）**、
+  **12,915 passed / 0 failed / 218 skipped（13,133テスト）**。通常経路のCJS6ファイルも**100 passed / 0 failed / 0 skipped**。
+- 最終コードで`npm run typecheck`と`npm run build`成功。`node --check extension/background.js` / `extension/venice-agent.js`も成功。
+- `volta run --node 22.23.5 node test/venice-write-stdin.visual.cjs`で実MAIN / ISOLATEDの描画を確認した。
+  前提はrepoルート、lockfile依存関係、macOSのChrome。ビルドは不要。全通信をローカル応答/abortにし、実コマンド・実Venice送信は行わない。
+  合成モデル4ターンでexec → poll → input → doneが通り、PC / モバイルで同じプロセス行の更新、改行、安全な文字列表示、横スクロールを確認。
+  画像も目視し、モバイルのパネルが画面内に収まることとページ例外0を確認した。
+- ログ・画像はGit対象外の`outputs/venice-write-stdin/`。再実行できるvisual harnessの正は追跡対象の`test/venice-write-stdin.visual.cjs`。
+
+### 不明なこと・次
+
+- 実Veniceモデルが`stdin_open`と継続操作を選ぶE2E、Windows / Linux実機での今回の入力経路は未確認。
+  実Veniceへの送信は行わず、attestation輸送の保留も継続する。
+- 第5段階を完了とし、次は第7段階の履歴UI。上流PRの提出保留を維持し、この作業ではpush・PR作成を行わない。

@@ -1,6 +1,6 @@
 # Venice 移植キュー
 
-0〜4と6は完了。追加の **4.5: attestation輸送は保留**。5のwrite_stdinと7以降は未着手。
+0〜4・5・6は完了。追加の **4.5: attestation輸送は保留**。次は7の履歴UI。
 
 | 状態（番号・項目） | 根拠commit | 残作業 |
 | --- | --- | --- |
@@ -10,7 +10,7 @@
 | 3. apply_patch — 完了 | `c3137481`, `063e6cb9` | なし（全体 516 passed / 0 failed） |
 | 4. exec_command — 完了 | `eba8035a`, `969752ce`, `ab7dd7a8`, `0c3fb4fd` | なし（追加20件成功。全体の失敗と切り分けは下記） |
 | 4.5. attestation輸送 — 保留 | 補助修正のみ `1ee5c67a` | 輸送本体・認証取得・401/403後の自動再送・実fetchのConsole手順は未実装。NUL除去と計画だけの応答への1回再試行のみ完了。詳細は `venice-attestation-status.md` |
-| 5. write_stdin — 未着手 | — | run所有権を使うstdin/poll接続。2.1.55 が出ていれば先にマージする |
+| 5. write_stdin — 完了 | `1d1eb1bd` | なし（追加15件。全体 529 passed / 0 failed / 20 skippedファイル、12,915 passed / 0 failed / 218 skippedテスト。2.1.55取込済み） |
 | 6. find — 完了 | `72b6daea`, `78d02537` | なし（追加16件、全体 523 passed / 0 failed） |
 | 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
 | 8. 通知 — 未着手 | — | Venice通知の接続・検証 |
@@ -19,7 +19,7 @@
 | 11. 総回帰 — 未着手 | — | 全機能が揃った時点での総回帰 |
 
 実送信の証拠と各段階の条件は `venice-findings.md` と `venice-integration-plan.md` を参照。
-3および今回の4はユーザー指定に従って実Venice送信なしで検証する。4は独立したshell同意を追加し、Desktopは追加しない。
+3・4・5・6は実Venice送信なしのローカル・合成経路で検証する。4・5は独立したshell同意を使い、Desktopは追加しない。
 
 ## 3の検証状況
 
@@ -54,6 +54,24 @@
   （初期localDocument通知と、core/readのスラッシュを許容しない既存CONTRACT検査）。既存テストは変更していない。
 - 検証ログ・画像: `outputs/venice-exec/`。実Venice送信は未実施（指定どおり）。次は5のwrite_stdin。
 
+
+## 5の検証状況
+
+- run所有のprocessIdに対し、同じ`/venice/tools`・host_admitted経路でpoll / stdinを接続した。
+  read / writeだけでは拒否し、shell同意を独立・既定OFFのまま維持する。
+- 既定のstdin-closedを変えず、Veniceの`exec_command({stdin_open: true})`だけでpipe入力を開く。
+  通常CoSのschema・PTY既定・read / write / findの動作は維持する。
+- runのleaseとmanagerの所有者を照合し、同一callIdは二重送信せず、別run・別document・失効後の新規操作を拒否する。
+  待機lock取得後にもcommand permission / grantを再検証する。終了後は空pollのみ、Ctrl-Cはpipeでも割り込みとして扱う。
+- 累積stdout / stderrを既存secrets shield・64KiB上限を通してパネルの同じプロセス行へ反映する。
+  新しいUIラベルを増やさず、既存のtextContent表示・改行・横スクロール・省略表示を再利用した。
+- 追加15件は実プロセス・実kernel・認証HTTP、およびMAIN / ISOLATED合成経路で成功。
+  既存テストはshell grantのtools配列2箇所に`core/write_stdin`を追加しただけ。削除・skip追加・判定緩和はない。
+- 全体`npm test`を実装固定後に1回実行し、**529 passed / 0 failed / 20 skipped**（549ファイル）、
+  **12,915 passed / 0 failed / 218 skipped**（13,133テスト）。先行するCJS6ファイルも**100 passed / 0 failed / 0 skipped**。
+- `npm run typecheck` / `npm run build`と変更JSの`node --check`は成功。
+  headless ChromeでPC / モバイルの実描画、safe text、1つの累積プロセス行、横スクロール、ページ例外0を確認した。
+  ログと画像は`outputs/venice-write-stdin/`、仕様と再実行コマンドは計画§15。実Venice送信は未実施。
 
 ## 6の検証状況
 

@@ -572,7 +572,7 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 - 出力は1プロセス64KiBまで先頭を保持し、stdout / stderrを分けて省略を表示する。
   実行中の出力取得は同じgatewayで元のsender / run / callIdを照合する観測のみとする。
 - waitは`yield_time_ms`、既定10,000ms・最大30,000ms。時間切れでkillせずprocessIdを返す。
-  `write_stdin`自体の公開は次の第5段階。
+  `write_stdin`の継続操作は§15を参照。
 - 入力は単一の`cmd`と任意の`workdir` / `yield_time_ms` / `shell` / `login`。
   stdoutとstderrを分離するためpipeモードを使い、`tty:true`と`cmds`は拒否する。
   既存の通常CoSのTTY / batch / 出力形式は変更しない。
@@ -586,8 +586,8 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
   yield後・モデルのdone後も生存プロセスは観測を続け、Stopまたは新規runで観測を止める。
 - spawn待ちも3本の枠に含め、spawn直後の生存期間・出力コールバックでrunに所有させる。
   killは既存のプロセスツリー終了を使う。StopのHTTP応答とapp終了は終了処理を待つ。
-- 第5段階ではこのrun所有者とprocessIdを使って継続操作を接続する。
-  現行pipeは既存managerのstdin-closed契約を保つため、空入力pollと非空入力の扱いを区別して設計・検証する。
+- 第5段階はこのrun所有者とprocessIdを使って接続する（§15）。
+  既存managerのstdin-closed既定を保つため、空入力pollと明示的に開いたstdinへの非空入力を区別する。
 
 検証は実Venice送信なし。`test/venice-exec.test.ts`は実kernel・実プロセス・一時フォルダー・認証HTTP、
 `test/venice-exec-ui.test.ts`は承認状態と全カタログ、`test/venice-exec-panel.test.ts`はMAIN / ISOLATEDの合成経路を使う。
@@ -630,3 +630,41 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 検証は実ファイルとripgrep、実kernel / gateway / 認証HTTPに加え、合成モデル応答のパネル経路を使う。
 `node test/venice-find.visual.cjs`で既存承認UIとパネルをheadless Chromeで確認し、外部通信は全てローカル応答またはabortにする。
 実Venice送信は行わない。根拠commit・検証結果はprogressとfindingsに記録する。
+
+## 15. core/write_stdin（2026-11-25 実装）
+
+時間のかかるコマンドは、`exec_command`が返した`processId`を`session_id`として継続する。
+空の`chars`は出力をpollし、非空の`chars`は明示的に開いたstdinへ送る。
+
+```js
+// Venice gatewayのargs。通常のCoS向けexec schemaにはstdin_openを追加しない。
+{cmd: 'node interactive-script.js', stdin_open: true, yield_time_ms: 1000}
+// 上の実行から返ったprocessIdを使う。
+{session_id: 1234, chars: '', yield_time_ms: 1000}    // poll
+{session_id: 1234, chars: 'hello\n', yield_time_ms: 1000} // input
+```
+
+- 新しいshell grantは`core/exec_command`と`core/write_stdin`を含む。read / writeだけではどちらも使えない。
+  承認チェックの追加は不要で、既存の独立shell同意・警告文・既定OFFをそのまま使う。
+- `/venice/tools`、host_admitted、既存UnifiedExecProcessManagerを通す。runのleaseとmanagerの所有者の両方を照合し、
+  別run・別document・未知のprocessIdからはstdinも出力も操作できない。数値のprocessIdだけでは権限にならない。
+- 既存のexec既定は変更しない。stdinは閉じたままで、pollは使えるが非空入力は拒否する。
+  Veniceで`stdin_open: true`を明示したときだけpipeのstdinを開き、stdout / stderr分離を維持する。
+  この引数はgatewayで検証してhost originへ渡し、通常のCoSのexec schemaやPTY既定は変えない。
+- 1プロセスのpoll / inputは既存のinteraction lockで直列化する。待機中に失効やcommand permission変更が起きた場合も、
+  lock取得後に再検証してから入力する。Read-only中も拒否する。Stop / revoke / app終了の既存killを引き継ぐ。
+- waitは既定10秒・最大30秒。空pollは既存managerどおり最低5秒の待機枠を取り、出力か終了が届けば早く返る。
+  出力が届いた瞬間はまだrunningの場合があるため、終了確認が必要なら新しいcallIdで再pollする。
+  pipeへの`chars: '\u0003'`は文字を書き込まず既存のプロセスツリー割り込みを使う。
+- 応答は元のexecの`callId` / `processId`と累積stdout / stderr、running / exitCodeを返す。
+  wire応答のcallIdは各継続呼び出しのもの。累積出力は同じ64KiB上限・省略表示・secrets shieldを通す。
+  MAIN / ISOLATED bridgeはこのsnapshotを既存パネルの同じプロセス行へtextContentで反映する。
+- 同じ継続callIdの再取得は確定済みの応答を返し、入力を二度送らない。失効後も元の所有者による確定応答の再取得は可能だが、
+  新しいcallIdでのpoll / inputは拒否する。終了済みprocessへ非空入力は送らない。
+  managerが保持している終了済み出力は空pollで読める。保持期間を超えて破棄されたIDは再実行せず拒否する。
+
+検証: `test/venice-write-stdin.test.ts`で一時フォルダー・実kernel・実プロセス・認証HTTPを使う。
+`test/venice-write-stdin-panel.test.ts`は実MAIN / ISOLATED bridgeと合成モデル応答を通す。
+`node test/venice-write-stdin.visual.cjs`はビルド不要、Node 22.23.5・lockfile依存関係・macOSのChromeを前提とし、
+外部通信をローカル応答/abortに限定してPC/モバイル表示、改行、安全な文字列表示、横スクロールを確認する。
+ログと画面は`outputs/venice-write-stdin/`。実Venice送信は行わない。
