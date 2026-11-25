@@ -712,3 +712,55 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/venice-history.vis
 専用userDataに合成履歴を作り、別プロセスでディスクから復元する。外部HTTP(S)は遮断し、通常アプリや開発サーバは再起動しない。
 英語・日本語、折り畳み、文字列の安全な表示、復元後の作業中表示、入力送信0を確認する。ログ・画像は`outputs/venice-history/`。
 対象はローカルのタスク履歴で、Veniceサーバの過去チャット取り込みではない。
+
+## 17. 通知 — 実装済み、OS実表示の受け入れ待ち
+
+作業が完了・失敗したとき、またはフォルダー承認を待つときに、既存のElectron通知・サウンド・スマホ通知へ渡す。
+ネイティブ通知のクリックで対象のローカルsessionを開き、承認待ちならその要求IDを選ぶ。
+
+- gatewayが新規に保存できた終了報告と、appが所有する承認要求だけを通知する。履歴の再読込・再起動中断・Stop・各ツールの失敗は通知を増やさない。
+  同一runの終了と同一承認IDは重複通知しない。通知配信が失敗しても、保存済みの終了報告は取り消さない。
+- 完了のデスクトップ通知は既存の`ui.turnNotifications`に従う。失敗・承認待ちは既存のneeds-you通知と同じく独立扱い。
+  アプリがフォーカス中はデスクトップ通知を抑える。サウンド・スマホは既存の同意、quiet hours、頻度制限を使う。
+- クリック先は全OSでローカルsession。Settingsからもタイムラインへ切り替え、一覧ページ外のsessionは既存の取得経路で開く。
+  承認済み・失効済み要求や削除済みsessionへのクリックは無視し、他の作業に振り替えない。クリックで同意・送信はしない。
+  ネイティブフォルダー選択中は、通知による承認要求の切り替えを選択終了まで待つ。
+- スマホへは`provider: 'venice'`を渡す。標準では状態だけ、既存の詳細表示設定をONにした場合だけタイトルを追加する。
+  生の指示・回答・エラー本文は送らず、ChatGPT URL、Telegram返信先・Deny操作は付けない。既存のChatGPTイベントは従来どおり。
+- 通知の文言は既存のmain-texts配信とja / enカタログを使用する。他言語の英語fallbackを維持する。
+
+### 再実行する
+
+repoルート、Node 22.23.5、lockfileの依存関係、ビルド済みpreload / rendererとmacOS GUIセッションが前提。
+正のharnessは`test/venice-notifications.visual.cjs`。通常のCoS / 開発サーバは再起動しない。
+
+```sh
+volta run --node 22.23.5 npm run build
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/venice-notifications.visual.cjs
+```
+
+専用userDataの実store・gateway・preload・rendererを使う。合成の完了・承認・失敗から、ネイティブ通知オブジェクトへ合成clickを渡して遷移を確認する。
+英語・日本語、対象session / 承認ID、Settingsからの復帰、失効クリック、送信・自動承認0を確認する。外部HTTP(S)は遮断し、スマホ送信・サウンドはstubにする。
+ログ・画像はGit対象外の`outputs/venice-notifications/`。この通常コマンドはOSへバナーを送らない。
+
+OS通知が許可された環境で実バナーも試す場合は、`--native --inspect`を付ける。
+`native`配列がOSからのshow / failed、`opened`がアプリ内遷移の証跡であり、合成clickの成功をOSバナーの成功とは扱わない。
+`--inspect`は検証用ウィンドウを閉じるまで待つ。通常アプリを終了する必要はない。
+
+2026-11-25の実測では、npm同梱Electronは通知設定をONにしても`UNErrorDomain 1`で拒否された。
+このruntimeはlinker署名のみで、Info.plistの束縛とbundleのresource sealがなかった。
+通常パッケージが使う既存の`afterpack-macos-adhoc-seal.mjs`を検証用コピーに適用すると、4件全てでOSの`show`を受け取れた。
+[Electronの公式通知仕様](https://www.electronjs.org/docs/latest/tutorial/notifications#macos)にも、macOS通知にはコード署名が必要とある。
+開発用の検証は次のコピーで再現できる。元のElectronや通常アプリを署名し直さず、証明書・notarizationも使わない。
+
+```sh
+mkdir -p outputs/venice-notifications/sealed-runtime
+ditto node_modules/electron/dist/Electron.app outputs/venice-notifications/sealed-runtime/Electron.app
+volta run --node 22.23.5 node --input-type=module -e "import seal from './scripts/afterpack-macos-adhoc-seal.mjs'; await seal({electronPlatformName:'darwin',appOutDir:'outputs/venice-notifications/sealed-runtime',packager:{appInfo:{productFilename:'Electron'}}});"
+env -u ELECTRON_RUN_AS_NODE ELECTRON_OVERRIDE_DIST_PATH="$PWD/outputs/venice-notifications/sealed-runtime" ./node_modules/.bin/electron test/venice-notifications.visual.cjs --native --inspect
+```
+
+Electronの通知許可を変更する場合は利用者の同意を得て、検証後に元へ戻す。今回の設定は元のOFFへ復元した。
+OS受付と実バナーの描画・クリックは別に確認する。今回はGUIツールで通知センターを開けず、バナーの目視・実クリックは未確認。
+この確認を第8段階の残作業とし、実モデルMVP・Desktopの拡張より先に行う。
+実Venice送信、attestation再送、スマホへの実送信は行っていない。

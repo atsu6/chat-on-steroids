@@ -2728,3 +2728,56 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
   attestation輸送は保留を継続する。
 - 第7段階を完了とし、次は第8段階の通知。既存通知経路へ、正しいsessionを開く完了・失敗・承認待ち通知を接続する。
   上流用ブランチ・CI・PR提出には触れず、pushも行っていない。
+
+## 2026-11-25 — Venice通知の接続と、OS受付・実表示の切り分け
+
+### 分かったこと
+
+- 実装`848e554c`で、gatewayの保存済み完了・失敗報告とapp所有の承認待ちを既存通知経路へ接続した。
+  履歴からは通知を再生せず、通知側の例外で保存済み結果を取り消さない。同一run / 承認要求の通知は一度だけ。
+- 完了は既存のturnNotifications設定、失敗・承認待ちは既存needs-you通知と同じ独立扱い。
+  フォーカス中のデスクトップ通知を抑え、サウンド・スマホの同意とquiet hours・頻度制限は既存実装を使う。
+- クリックは全OSでローカルsessionへ向ける。既存のChatGPT用クリック経路ではSettingsから会話画面へ切り替わらないため、
+  Venice専用の固定IPCと既存の一覧ページ外session取得経路を組み合わせた。ChatGPT側の既存経路は変更していない。
+  承認IDを指定し、既に失効した通知を他の要求へ振り替えない。クリックは許可・送信を行わない。
+- スマホは既定で状態のみ、既存の詳細表示がONならタイトルだけを追加する。生の回答・指示・エラーは送らない。
+  Venice通知へChatGPT URLやTelegram返信先・Deny操作を付けると別providerの操作になるため、新しいprovider属性で除外した。
+  通常のChatGPTイベントは従来どおり。今回、スマホ・Telegramへ実メッセージは送っていない。
+
+### 検証結果
+
+- 追加は通知制御14件・gateway5件・承認UI / IPC6件・スマホ5件の30件。既存関連を含む13ファイル・104件成功。
+  typecheck・build、visual harnessのnode --checkが成功。既存テストは変更していない。
+- 実装固定後の全体npm testは1回。**534 passed / 2 failed / 20 skipped（556ファイル）**、
+  **12,958 passed / 3 failed / 218 skipped（13,179テスト）**。先行する通常経路のCJS6ファイルは**100 passed / 0 failed / 0 skipped**。
+- 失敗は既存の以下3件。元の同じ実行ログで失敗箇所を確認した。
+  - `renderer-timeline.part1.test.ts`: `keeps the prior transcript inert until the selected detail arrives and fences A to B to A` のimmediate / deferred traces。
+    待機内にCURRENT A ANSWERが出ず、以前のA ANSWERが残った（619行）。
+  - `session-list-refresh.test.ts`: `retries via catalog catch-up when a full-size incremental drain read fails and cancels pending drain on hide`。
+    待機内にRecovered trailing drain rowが出なかった（995行）。
+- 該当2ファイルを単独のVitest実行で確認すると、**145 passed / 0 failed / 0 skipped**で全件成功した。
+  フレークとして記録する。非再現の失敗を消すために既存のタイムライン処理・テスト・timeoutは変更せず、全体0 failedとは記録しない。
+- 実store / gateway / ビルド済みpreload / rendererを専用userDataで使い、合成clickからSettings→対象session、2件目の承認選択、
+  ja / en、失効済みクリック無視、入力送信0・自動承認0・ページエラー0を確認し、実描画を目視した。
+  最初はDOM更新直後のcaptureに前フレームが残ったため、描画完了を待ってから画像を保存するようharnessを修正した。
+
+### OS通知の切り分けと残作業
+
+- npm同梱のElectron 44.3.0は、通知を一時ONにしても4件とも`UNErrorDomain 1`で拒否された。
+  codesignの実値はlinker署名のみ、Info.plist未束縛・Sealed Resourcesなしだった。
+- [Electron公式のmacOS通知仕様](https://www.electronjs.org/docs/latest/tutorial/notifications#macos)を確認し、
+  検証用コピーへ既存の`afterpack-macos-adhoc-seal.mjs`を適用した。通常パッケージと同じbundle整備で、
+  **4件すべてがshow、failed 0件**になった。元のElectron・通常アプリ・appId・署名方針は変更していない。
+- OS受付は確認できたが、バナーの目視とネイティブな実クリックは未確認。
+  通知センターのAutomationはClockセレクタを取得できず、CUA / agent-desktopのFn入力も非対応だった。
+  このGUI操作依存を残し、受け入れ済みとはしない。利用者に承認されたElectron通知の一時ONは、検証後に元のOFFへ戻した。
+- 正のharnessは`test/venice-notifications.visual.cjs`、再実行手順は計画§17。
+  ログは`outputs/venice-notification-full-test.log`、`outputs/venice-notification-failure-isolation.log`、
+  OS受付は`outputs/venice-notifications-sealed-runtime.log`と`outputs/venice-notifications/native-result.json`。いずれもGit除外。
+
+### 不明なこと・次
+
+- 第8段階は実装済み・実表示受け入れ待ちとして保留。担当はCodex。再開条件は、通知センターを操作できるGUI経路、または利用者による実クリックの補助。
+  計画§17の署名整備済みコピーと`--native --inspect`で、OS通知から正しいsessionへ戻ることを実操作で確認したら完了にする。
+- その後は既存Web UI経路で文字作業MVPの成功率を測り、それから9のDesktop AXへ進む。
+  実Venice・スマホ送信、attestation再送、push・PR作成は今回行っていない。
