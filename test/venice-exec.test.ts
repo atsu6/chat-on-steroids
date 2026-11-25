@@ -57,7 +57,7 @@ it('keeps shell OFF for read and write grants and refuses exec without spawning'
 });
 
 it('runs echo through host_admitted in the first grant root with separate output and no write upgrade', async () => {
-  const g = await grant(); expect(g.write).toBeUndefined(); expect(g.tools).toEqual(['core/read', 'core/exec_command']);
+  const g = await grant(); expect(g.write).toBeUndefined(); expect(g.tools).toEqual(['core/read', 'core/exec_command', 'core/write_stdin']);
   const req = request(g.runId, nodeCommand('process.stdout.write(process.cwd()+"\\nline1\\nline2\\n");process.stderr.write("diagnostic\\n")'));
   const output = result(await gateway.call(req, sender));
   expect(output).toMatchObject({ exitCode: 0, running: false, stdout: root + '\nline1\nline2\n', stderr: 'diagnostic\n', truncated: false });
@@ -181,7 +181,7 @@ it('persists explicit shell consent without implying write or upgrading earlier 
   const reply = await pendingReply; if (!('runId' in reply)) throw new Error(reply.error); runs.push(reply.runId);
   expect(result(await gateway.call(request(reply.runId), sender)).exitCode).toBe(0);
   const saved = await readDurable<Array<{ value: VeniceRunGrant }>>('venice-grants');
-  expect(saved?.find(row => row.value.runId === reply.runId)?.value).toMatchObject({ shell: true, tools: ['core/read', 'core/exec_command'] });
+  expect(saved?.find(row => row.value.runId === reply.runId)?.value).toMatchObject({ shell: true, tools: ['core/read', 'core/exec_command', 'core/write_stdin'] });
   expect(saved?.find(row => row.value.runId === reply.runId)?.value.write).toBeUndefined();
   expect((await gateway.call(request(old.runId), sender)).error).toBe('TOOL_NOT_GRANTED');
 });

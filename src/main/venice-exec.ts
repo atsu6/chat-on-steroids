@@ -76,6 +76,10 @@ export class VeniceExecRuns {
     this.leases.set(callId, lease); return lease;
   }
   get(callId: string): VeniceExecLease | undefined { return this.leases.get(callId); }
+  forProcess(runId: string, processId: number): VeniceExecLease | undefined {
+    // Prefer the latest incarnation if the manager has recycled a discarded numeric id.
+    return [...this.leases.values()].reverse().find(lease => lease.runId === runId && lease.processId === processId);
+  }
   revoke(runId: string): void {
     for (const lease of this.leases.values()) if (lease.runId === runId) {
       void lease.revoke().catch(() => undefined);

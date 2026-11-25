@@ -85,8 +85,10 @@ export interface HostAdmittedOrigin {
   write?: boolean;
   preview?: boolean;
   shell?: boolean;
+  /** Explicit Venice-only pipe input; ordinary exec callers retain closed stdin. */
+  stdinOpen?: boolean;
   exec?: import('../venice-exec.js').VeniceExecLease;
-  tool?: 'read' | 'find' | 'apply_patch' | 'exec_command';
+  tool?: 'read' | 'find' | 'apply_patch' | 'exec_command' | 'write_stdin';
   runId: string;
   sessionId: string;
   roots: Root[];

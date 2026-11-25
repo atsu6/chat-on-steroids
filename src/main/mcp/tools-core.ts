@@ -1013,6 +1013,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (venice?.exec) venice.exec.processId = processId;
             const output = await unifiedExecManager.execCommand({
               observer: venice?.exec?.observer,
+              stdinOpen: venice?.stdinOpen === true,
               classifyExit: (exitCode, rawOutput) => {
                 if (!batch) return nonZeroExitIsBenign(boundCommand, exitCode, rawOutput);
                 const sections = parseCommandBatchSections(rawOutput, batch.marker);
@@ -1147,6 +1148,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async (input) =>
         reg.guarded('command', 'write_stdin', async () => {
+          const host = currentCall()?.origin;
+          const venice = host?.type === 'venice' ? host : undefined;
+          const admit = () => {
+            if (!venice) return;
+            if (!venice.current() || !venice.shell || !effectiveCapabilities(getConfig()).command) throw new Error('RUN_REVOKED_OR_COMMAND_DISABLED');
+            if (!venice.exec || venice.exec.runId !== venice.runId || venice.exec.processId !== input.session_id || execOwnershipFailure(input.session_id, execPrincipal())) throw new Error('EXEC_SESSION_OWNER_MISMATCH');
+          };
           // The ownership registry decides both admission and the reason for refusal.
           // A request-scoped caller can continue a process it opened before proof. Another
           // request must wait for exact correlation; a numeric process id is not custody.
@@ -1187,9 +1195,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           noteExecAttended(input.session_id);
           try {
             const output = await unifiedExecManager.writeStdin({
+              admit: venice ? admit : undefined,
               processId: input.session_id,
               input: input.chars ?? '',
-              yieldTimeMs: input.yield_time_ms ?? DEFAULT_WRITE_STDIN_YIELD_TIME_MS,
+              yieldTimeMs: venice ? Math.min(input.yield_time_ms ?? 10_000, 30_000) : input.yield_time_ms ?? DEFAULT_WRITE_STDIN_YIELD_TIME_MS,
+              maxWriteStdinYieldTimeMs: venice ? 30_000 : undefined,
               maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
@@ -1203,11 +1213,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               durationMs: output.wallTimeMs
             });
             logInfo(`tool write_stdin ${input.session_id} (${(input.chars ?? '').length} chars)`);
+            if (venice?.exec) return veniceExecResult({ ...venice.exec.snapshot(), exitCode: output.exitCode, running: output.processId !== null });
             return {
               content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
               structuredContent: execCommandStructuredOutput(output)
             };
           } catch (error) {
+            if (venice && error instanceof UnifiedExecError && error.kind === 'stdin_closed') return fail('STDIN_CLOSED: this process was started without stdin_open:true. Empty chars can still poll its output; no input was sent.');
             const message = error instanceof Error ? error.message : String(error);
             const retry =
               error instanceof UnifiedExecError && error.kind === 'write_to_stdin'

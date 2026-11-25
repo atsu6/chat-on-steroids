@@ -240,6 +240,8 @@ export interface ExecProcessObserver {
 
 export interface SpawnParams {
   observer?: ExecProcessObserver;
+  /** Explicit host adapter opt-in; pipe stdin stays closed for existing callers. */
+  stdinOpen?: boolean;
   batchMarker?: string;
   /** The derived argv; element 0 is the executable. */
   command: string[];
@@ -393,9 +395,9 @@ class UnifiedExecProcess {
         // detached child is a process-group leader, which lets interrupt/terminate signal
         // the whole session without changing Windows' existing taskkill semantics.
         detached: process.platform !== 'win32',
-        // `stdin_open: tty` in Codex: a pipe session has no stdin, which is what makes
-        // write_stdin answer StdinClosed rather than pretending the write landed.
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // Ordinary Codex pipes remain stdin-closed; Venice can explicitly opt into input
+        // without a PTY, preserving separate stdout/stderr and the existing default.
+        stdio: [params.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         ...(verbatim ? { windowsVerbatimArguments: true } : {})
       });
     } catch (error) {
@@ -404,6 +406,8 @@ class UnifiedExecProcess {
 
     const managed = new UnifiedExecProcess(false, child.pid ?? -1, params.batchMarker);
     managed.child = child;
+    // A child may close its input between writes; surface EPIPE to the caller, not the app.
+    child.stdin?.on('error', () => {});
     // stdout and stderr are combined into one stream, exactly as `combine_output_receivers`
     // does on the local Codex path, so interleaving is preserved in arrival order.
     for (const [name, stream] of [['stdout', child.stdout], ['stderr', child.stderr]] as const) {
@@ -550,10 +554,17 @@ class UnifiedExecProcess {
         throw UnifiedExecError.writeToStdin();
       }
     }
+    const stdin = this.child?.stdin;
+    if (stdin && !stdin.destroyed && !stdin.writableEnded) {
+      await new Promise<void>((resolve, reject) => stdin.write(data, error => error ? reject(UnifiedExecError.writeToStdin()) : resolve()));
+      return;
+    }
     // A pipe session was spawned without stdin, so there is nothing to write to. Codex
     // reaches the same answer through `StdinClosed` before ever calling write.
     throw UnifiedExecError.writeToStdin();
   }
+
+  hasOpenStdin(): boolean { return this.tty || Boolean(this.child?.stdin); }
 
   async interrupt(): Promise<void> {
     if (this.pty) {
@@ -699,6 +710,7 @@ export function execCommandStructuredOutput(output: ExecCommandToolOutput): Reco
 
 export interface ExecCommandRequest {
   observer?: ExecProcessObserver;
+  stdinOpen?: boolean;
   classifyExit?: (exitCode: number | null, rawOutput: string) => boolean;
   batchMarker?: string;
   command: string[];
@@ -722,6 +734,8 @@ export interface WriteStdinRequest {
   maxOutputTokens: number | undefined;
   truncationPolicy: TruncationPolicy;
   maxWriteStdinYieldTimeMs?: number;
+  /** Revalidate host authority after waiting for this process's interaction lock. */
+  admit?: () => void;
 }
 
 export interface BackgroundTerminalInfo {
@@ -850,6 +864,7 @@ export class UnifiedExecProcessManager {
       process = await UnifiedExecProcess.spawn({
         batchMarker: request.batchMarker,
         observer: request.observer,
+        stdinOpen: request.stdinOpen,
         command,
         shellType: request.shellType,
         cwd: request.cwd,
@@ -971,21 +986,21 @@ export class UnifiedExecProcessManager {
     // Reads and writes against one session must not overlap: they share a draining buffer.
     const release = await locked.interactionLock.lock();
     try {
+      request.admit?.();
       const saved = replay(locked.identity);
       if (saved) return saved;
       const current = this.processes.get(request.processId);
       if (!current || current.process !== locked) throw UnifiedExecError.unknownProcessId(request.processId);
-      const { process, tty } = { process: current.process, tty: current.tty };
+      const { process } = current;
 
       let statusAfterWrite: ProcessStatus | null = null;
       if (request.input !== '') {
         if (process.hasExited()) throw UnifiedExecError.processFailed('Process already completed; no input was sent. Use empty chars to read its retained output.');
-        if (!tty) {
-          if (request.input === INTERRUPT) {
-            await process.interrupt();
-          } else {
-            throw UnifiedExecError.stdinClosed();
-          }
+        if (!current.tty && request.input === INTERRUPT) {
+          // A pipe has no terminal driver to turn ETX into SIGINT, even when stdin is open.
+          await process.interrupt();
+        } else if (!process.hasOpenStdin()) {
+          throw UnifiedExecError.stdinClosed();
         } else {
           try {
             await process.write(request.input);

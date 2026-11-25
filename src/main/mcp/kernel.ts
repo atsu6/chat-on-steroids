@@ -1618,13 +1618,13 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
     async invokeHostAdmitted(name, args, origin) {
       // Host admission has an explicit tool allowlist; shell never follows from file permission.
-      if (surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
+      if (surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command', 'write_stdin'].includes(name)) return fail('UNKNOWN_TOOL: this tool is not host admitted.');
       if (name === 'apply_patch' && origin.write !== true) return fail('TOOL_NOT_GRANTED');
-      if (name === 'exec_command' && (origin.shell !== true || !origin.exec)) return fail('TOOL_NOT_GRANTED');
+      if (['exec_command', 'write_stdin'].includes(name) && (origin.shell !== true || !origin.exec || origin.exec.runId !== origin.runId)) return fail('TOOL_NOT_GRANTED');
       if (name === 'find' && origin.read !== true) return fail('TOOL_NOT_GRANTED');
       const reading = name === 'read' || name === 'find' || origin.preview === true;
       const context: CallContext = {
-        origin: { ...origin, tool: name as 'read' | 'find' | 'apply_patch' | 'exec_command' }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
+        origin: { ...origin, tool: name as NonNullable<HostAdmittedOrigin['tool']> }, startedAt: Date.now(), transportKey: `venice:${origin.runId}`, agent: null,
         allowUnattributed: false, evidence: emptyEvidence(), outcome: null,
         publication: { completedAt: null, failed: false },
         caller: { transportKey: `venice:${origin.runId}`, requestId: null,
@@ -1634,7 +1634,7 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
         const session = await getSession(origin.sessionId);
         if (!session || session.conversationId || session.endedAt) return fail('VENICE_SESSION_UNAVAILABLE');
         if (!origin.current()) return fail('RUN_REVOKED');
-        if (name === 'exec_command' && (!caps.command || !effectiveCapabilities(getConfig()).command)) return fail('TOOL_DISABLED: command execution is not permitted.');
+        if (['exec_command', 'write_stdin'].includes(name) && (!caps.command || !effectiveCapabilities(getConfig()).command)) return fail('TOOL_DISABLED: command execution is not permitted.');
         if (reading && (!caps.read || !effectiveCapabilities(getConfig()).read)) return fail('TOOL_DISABLED: read requires reading permission.');
         const entry = handlers.get(name);
         const result = await guard(name, async () => {
@@ -1647,7 +1647,7 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
           : await shieldOutput(context, name, result);
         if (!origin.current()) delivered = fail('RUN_REVOKED');
         else if (reading && !effectiveCapabilities(getConfig()).read) delivered = fail('TOOL_DISABLED: read requires reading permission.');
-        if (name === 'exec_command' && delivered.structuredContent && !delivered.isError) {
+        if (['exec_command', 'write_stdin'].includes(name) && delivered.structuredContent && !delivered.isError) {
           delivered = veniceExecResult(delivered.structuredContent as unknown as import('../../shared/venice-integration.js').VeniceExecOutput);
         }
         if (origin.preview) return delivered;

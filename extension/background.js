@@ -5847,7 +5847,7 @@ async function handleVeniceBridge(message, sender) {
     const runId = (await chrome.storage.session.get(runKey))[runKey];
     if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
     const args = message.args ?? {};
-    if (args.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(args.tool) || (message.op === 'previewPatch' && args.tool !== 'apply_patch') || (message.op === 'execOutput' && args.tool !== 'exec_command')) throw new Error('Tool is not available on the Venice gateway');
+    if (args.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command', 'write_stdin'].includes(args.tool) || (message.op === 'previewPatch' && args.tool !== 'apply_patch') || (message.op === 'execOutput' && args.tool !== 'exec_command')) throw new Error('Tool is not available on the Venice gateway');
     const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({sender: source,
       ...(message.op === 'previewPatch' ? {preview: true} : {}),
       ...(message.op === 'execOutput' ? {output: true} : {}),

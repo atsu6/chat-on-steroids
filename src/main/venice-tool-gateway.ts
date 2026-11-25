@@ -169,7 +169,7 @@ export class VeniceToolGateway {
     const session = await getSession(sessionId);
     if (!session || session.conversationId || session.endedAt || this.stopped || this.grants.size >= 32) throw new Error('venice_grant_unavailable');
     const value: VeniceRunGrant = { runId: randomUUID(), sessionId, roots: roots.map(root => root.path),
-      tabId: sender.tabId, documentId: sender.documentId, tools: ['core/read', ...(find ? ['core/find'] : []), ...(write ? ['core/apply_patch'] : []), ...(shell ? ['core/exec_command'] : [])],
+      tabId: sender.tabId, documentId: sender.documentId, tools: ['core/read', ...(find ? ['core/find'] : []), ...(write ? ['core/apply_patch'] : []), ...(shell ? ['core/exec_command', 'core/write_stdin'] : [])],
       ...(write ? { write: true } : {}), ...(shell ? { shell: true } : {}) };
     const grant: Grant = { value, sender: veniceSenderSchema.parse(sender), active: true, roots: structuredClone(roots), configured };
     this.grants.set(value.runId, grant);
@@ -223,9 +223,9 @@ export class VeniceToolGateway {
     const current = () => !this.stopped && grant.active && (!grant.configured ||
       grant.roots.every(root => getConfig().roots.some(live => !live.remote && live.path === root.path && live.name === root.name)));
     if (!current()) return refusal(request.callId, 'RUN_REVOKED');
-    if (request.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command'].includes(request.tool) ||
+    if (request.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command', 'write_stdin'].includes(request.tool) ||
         !grant.value.tools.includes(`core/${request.tool}`) || (request.tool === 'find' && !grant.value.tools.includes('core/read')) || (request.tool === 'apply_patch' && grant.value.write !== true) ||
-        (request.tool === 'exec_command' && grant.value.shell !== true)) return refusal(request.callId, 'TOOL_NOT_GRANTED');
+        (['exec_command', 'write_stdin'].includes(request.tool) && grant.value.shell !== true)) return refusal(request.callId, 'TOOL_NOT_GRANTED');
     return { grant, current };
   }
 
@@ -287,8 +287,13 @@ export class VeniceToolGateway {
               result = { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : 'EXEC_LIMIT' }] };
             }
           }
-          if (request.tool !== 'exec_command' || exec) result = await this.deps.execute(request, grant.value, current, grant.roots, false, exec);
-        } finally { exec?.finishInvocation(); }
+          if (request.tool === 'write_stdin') {
+            const id = request.args.session_id;
+            if (typeof id === 'number' && Number.isInteger(id)) exec = this.execRuns.forProcess(request.runId, id);
+            if (!exec) result = { isError: true, content: [{ type: 'text', text: 'EXEC_SESSION_OWNER_MISMATCH: no process owned by this run; no input was sent or output read.' }] };
+          }
+          if (!['exec_command', 'write_stdin'].includes(request.tool) || exec) result = await this.deps.execute(request, grant.value, current, grant.roots, false, exec);
+        } finally { if (request.tool === 'exec_command') exec?.finishInvocation(); }
         // Keep bounded JSON, not an unbounded image batch, in the first text-only ledger.
         row.response = Buffer.byteLength(JSON.stringify(result) ?? '') > 1_000_000
           ? { callId: request.callId, state: 'completed', error: 'RESULT_TOO_LARGE' }
@@ -305,11 +310,18 @@ export class VeniceToolGateway {
 async function executeLocalTool(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots: Root[] = [], preview = false, exec?: VeniceExecLease): Promise<unknown> {
   const config = getConfig();
   const caps = effectiveCapabilities(config);
+  // This opt-in belongs to the Venice adapter, not the ordinary CoS exec schema/defaults.
+  const args = { ...request.args };
+  const stdinOpen = request.tool === 'exec_command' && args.stdin_open === true;
+  if (request.tool === 'exec_command' && Object.hasOwn(args, 'stdin_open')) {
+    if (typeof args.stdin_open !== 'boolean') return { isError: true, content: [{ type: 'text', text: 'INVALID_ARGUMENT: stdin_open must be a boolean.' }] };
+    delete args.stdin_open;
+  }
   // Expose the existing handlers; the independent live host grant still admits each tool.
   const reg = createRegistrar(null, { roots, caps, exposedCaps: { ...caps, read: true, create: true, edit: true, move: true, deleteFile: true, command: true, search: true }, readOnly: config.readOnly,
     exposedFind: true, sessionTools: false, agentTools: false }, 'core');
   registerCoreTools(reg);
-  return reg.invokeHostAdmitted(request.tool, request.args, { type: 'venice', read: grant.tools.includes('core/read'), write: grant.write === true, shell: grant.shell === true, exec, preview, runId: grant.runId,
+  return reg.invokeHostAdmitted(request.tool, args, { type: 'venice', read: grant.tools.includes('core/read'), write: grant.write === true, shell: grant.shell === true, stdinOpen, exec, preview, runId: grant.runId,
     sessionId: grant.sessionId, roots, current });
 }
 

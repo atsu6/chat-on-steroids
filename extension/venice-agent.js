@@ -5,7 +5,8 @@ const CONTRACT = `あなたは作業用タブのDOMを操作するエージェ�
 core/read({paths, start_line?, end_line?, max_bytes?}) -> appで許可したroot内のファイルを読む。appのgrantが必要
 core/find({query, path?, mode?, include?, exclude?, case_sensitive?, regex?, max_results?}) -> read権限とcore/findを含むappのgrantが必要。許可root内を検索。既定content・200件（最大500）。matchesのpath/line/textとtruncatedを返す。バイナリは除外
 core/apply_patch({patch}) -> appで書き込みを別途許可したroot内だけを変更。*** Begin Patch / *** Add File: path / +行 / *** Update File: path / *** Move to: path / @@ / -旧行 / +新行 / *** Delete File: path / *** End Patch 形式。shell実行はできない
-core/exec_command({cmd, workdir?, yield_time_ms?, shell?, login?}) -> 独立したshell許可が必要。cwdは許可root内。既定10秒・最大30秒で待ち、processId・exitCode・stdout/stderr出力を返す。出力は64KiBまで。生存processIdは次段階のwrite_stdin用（まだ利用不可）。同時3本まで。Stopでrunのプロセスを終了
+core/exec_command({cmd, workdir?, yield_time_ms?, shell?, login?, stdin_open?}) -> 独立したshell許可が必要。cwdは許可root内。既定10秒・最大30秒で待ち、processId・exitCode・stdout/stderr出力を返す。出力は64KiBまで。stdin_open:trueを明示した場合だけ入力を開く（既定false）。同時3本まで。Stopでrunのプロセスを終了
+core/write_stdin({session_id, chars?, yield_time_ms?}) -> 同じrunが起動したprocessIdをsession_idに指定。shell許可が必要。chars省略/空文字は出力poll、非空文字はstdin_open:trueのプロセスへ入力。既定10秒・最大30秒。累積stdout/stderrと終了状態を返す。同じcallIdの再取得は入力を繰り返さない。閉じたstdinには送らない
 now() -> 現在時刻のISO文字列
 tab_open({url}) -> 作業用タブを作成または指定URLへ遷移してURLを返す。DOMツールの前に実行する
 query({selector}) -> 件数と最大20件の番号・tagName・id・クラス先頭・テキスト先頭40文字
@@ -179,7 +180,7 @@ async function callLocalTool(tool, args = {}, beforeApply, onExecOutput) {
       throw new Error(`${response.error || response.state || 'unknown'} (callId=${request.callId})`);
     }
     if (response.result?.isError) throw new Error(response.result.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || `Local ${tool} failed`);
-    if (tool === 'exec_command' && response.result?.structuredContent) {
+    if (['exec_command', 'write_stdin'].includes(tool) && response.result?.structuredContent) {
       latest = response.result.structuredContent; onExecOutput?.(latest);
     }
     return response.result;
@@ -191,6 +192,7 @@ const TOOL_REGISTRY = Object.freeze({
   'core/find': args => callLocalTool('find', args),
   'core/apply_patch': (args, beforeApply) => callLocalTool('apply_patch', args, beforeApply),
   'core/exec_command': (args, _beforeApply, onOutput) => callLocalTool('exec_command', args, undefined, onOutput),
+  'core/write_stdin': (args, _beforeApply, onOutput) => callLocalTool('write_stdin', args, undefined, onOutput),
   now: () => new Date().toISOString(),
   tab_open: async ({url} = {}) => (await callVeniceBridge('ensureTab', {url})).url,
   query: (args = {}) => callVeniceBridge('eval', {name: 'query', args}),
