@@ -2439,3 +2439,48 @@ whats-new-dpr{1,2}-fixed.log、ferro-{targeted,typecheck,build,visual}.logとfer
 
 - CIのrunner待ちと実際のアイコン中央揃え失敗は解消した。結果の追記だけなので、実装・テスト・workflow・依存関係はCI対象5a3fc432と同じ。
 - 次のAPI最小疎通は別作業のまま。上流PRはまだ作成していない。
+
+## 2026-11-25 — 名前の静的ソース確認とコミット対称性の未達
+
+### 名前は定数1箇所で選択する
+
+- 表示名の選択元は`src/shared/app-brand-name.ts:2`のAPP_DISPLAY_NAMEだけ。
+  mainの`src/main/app-brand.ts:9,12`がdev判定と接尾辞を決め、同:21,32がnative表示へ使う。
+  `src/main/ipc.ts:700`からAppStateへ渡し、`src/renderer/main.ts:1673`と`src/renderer/app-brand.ts:5-7`が既存のt/uiで表示する。
+  カタログ・MainTextの型／一覧にある名前は翻訳用の静的データで、別の表示名選択ロジックではない。
+- `artwork/app-icon-source.svg:2`のVenice名は非描画のtitleメタデータ。SVGは静的原本で、表示名定数からの生成物ではない。
+  `src/renderer/index.html:5,36`のtitle／ヘッダは空bindingで、Venice名の直書きはない。同ファイルに残るCoS本文は別の既存UI文言。
+  `electron.vite.config.ts:51`はこのHTMLをビルド入力としている。
+- SVGからPNGを描画するのは`test/dev-brand.visual.cjs:13-16`、そのPNGからICO／PNGを出すのは`scripts/make-icon.mjs:26,363-364`。
+  ICNSは`electron-builder.yml:117`のPNG入力からbuilderが変換する。SVG／srcのHTMLを定数で生成する手順は無い。
+  上流候補906666f2にはSVG原本がなく、元のCoSマークを維持する。ferro関連の差分はフォーク固有であり、上流PR本文へ含めない。
+- 「埋め込み2箇所」は確認された事実ではない。両ブランチの全出現・分類・根拠は`outputs/dev-name-source-audit/inventory.md`と同JSONに保存した。
+
+### 追従とCI修正の取り違えを訂正する
+
+- 実際の追従は`9dd2aa895fc487059726dbe4a1a7e175940e657a`。定数ファイル1件、+1/-1だけで、名前以外を変更していない。
+- ユーザーが参照した「5ファイル +63/-10」はCI修正側の差分だったとの訂正を受けた。これを追従コミットのstatと結び付けない。
+  現履歴のCI修正36f5dd56の`git show --stat`は6ファイル +35/-21であり、前記の比較範囲自体は特定していない。
+  fcf8a3cfも追従ではなく、文書2ファイル +21/-1の記録コミットである。
+
+### コミット対称性の検証結果
+
+- 上流側で定数ファイルに触るコミットは`70589d99fb477b17616a46cfa65bb0b956e43cdc`だけ。
+  `git show --stat`は17ファイル +180/-11で、定数ファイルは親に無く、このコミットで新規作成されている。
+  これは独立したVenice→CoSのrenameではなく、dev表示機能の導入コミットである。
+- 70589d99と9dd2aa89のファイル集合は不一致。`git show -R 9dd2aa89`との比較でも完全な逆写像は成立しない。
+  HTMLの変更は空bindingの導入であり、余分なrenameとして戻せるものではない。SVGは70589d99に含まれない。
+- 現在の定数ファイルと各コミット後の内容は一致する。9dd2aa89の逆差分を現在のフォーク側の内容へ適用した結果も、上流側の現在の内容と一致する。
+  名前1行の内容比較は成功したが、これをコミット対称性の合格とは読み替えない。
+- コードは増減せず、上流への不要な往復renameや履歴上書きも行わない。
+  70589d99を機能導入とrenameへ履歴分割するには、既存上流ブランチのfast-forward限定方針とは別の判断が必要。
+  揃わないまま進めない指定に従い、必須の記録訂正とPR本文案の整理だけを行い、受け入れ未達として停止する。
+
+検証資料: `outputs/dev-name-symmetry/verification.json`、`upstream-candidate.patch`、`fork-follow.patch`、`fork-follow-reversed.patch`。
+
+### PR本文案と検証の状態
+
+- 本文案は`docs/upstream-dev-suffix-pr.md`。dev接尾辞、productName/appId据え置きによるパッケージ版のidentity／userData維持、
+  macOSメニューがcheckoutではElectron・packageでは本番名のまま残る点だけを記載した。アイコン変更は含めず、PRは作成していない。
+- 名前・その他の製品コード、CI workflow、push条件は変更していない。
+  手順1の停止条件に当たったため、今回指定された両ブランチのテスト・typecheck・buildは未実行。過去の成功を今回の再実行として報告しない。
