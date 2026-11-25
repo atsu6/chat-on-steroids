@@ -4043,5 +4043,16 @@
   "コマンドの実行も許可する": "コマンドの実行も許可する",
   "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。": "あなたの権限でコマンドを実行できます。選択したフォルダー内に隔離されず、その外のファイルやネットワークにもアクセスできます。",
   "File reading and search (core/read, core/find)": "ファイルの読み取りと検索（core/read、core/find）",
-  "ファイルの読み取りと検索（core/read、core/find）": "ファイルの読み取りと検索（core/read、core/find）"
+  "ファイルの読み取りと検索（core/read、core/find）": "ファイルの読み取りと検索（core/read、core/find）",
+  "Venice task started": "Veniceタスク開始",
+  "Venice task completed": "Veniceタスク完了",
+  "Venice task failed": "Veniceタスク失敗",
+  "Venice task stopped": "Veniceタスク停止",
+  "Venice task interrupted by app restart": "アプリ再起動によりVeniceタスクが中断",
+  "Venice step {0}: {1}": "Veniceステップ {0}: {1}",
+  "Venice run {0}": "Venice run {0}",
+  "Reported by the Venice page": "Veniceページからの報告",
+  "Page report truncated at 64,000 characters.": "ページからの報告は64,000文字まで記録しています。",
+  "Succeeded": "成功",
+  "Run permission was revoked. No further steps will run.": "runの許可が失効しました。次のステップは実行しません。"
 }

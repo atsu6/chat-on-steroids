@@ -1226,6 +1226,13 @@ export function answerLine(text: string): string | null {
 
 function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   applyTurnIdentity(summary, event);
+  if (event.kind === 'note' && event.venice) {
+    const { runId, phase } = event.venice;
+    const active = new Set(summary.veniceRuns ?? []);
+    if (phase === 'started') active.add(runId);
+    else if (phase !== 'step') active.delete(runId);
+    summary.veniceRuns = [...active];
+  }
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
   // which can be after the page has already reported the end of the turn it ran in, and

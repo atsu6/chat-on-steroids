@@ -63,6 +63,7 @@ function createAgent(sendViaUi) {
     const requested = options.maxSteps ?? 10;
     if (!Number.isInteger(requested) || requested < 1) throw new TypeError('maxSteps must be a positive integer');
     if (options.onStep !== undefined && typeof options.onStep !== 'function') throw new TypeError('onStep must be a function');
+    if (options.onHistoryStep !== undefined && typeof options.onHistoryStep !== 'function') throw new TypeError('onHistoryStep must be a function');
     if (options.onFindResult !== undefined && typeof options.onFindResult !== 'function') throw new TypeError('onFindResult must be a function');
     if (options.onExecOutput !== undefined && typeof options.onExecOutput !== 'function') throw new TypeError('onExecOutput must be a function');
     if (options.onPatchPreview !== undefined && typeof options.onPatchPreview !== 'function') throw new TypeError('onPatchPreview must be a function');
@@ -76,8 +77,9 @@ function createAgent(sendViaUi) {
       Object.assign(error, {code: 'VENICE_TASK_STOPPED', steps: steps.slice(), stepCount: steps.length});
       throw error;
     };
-    const report = (name, ok, value) => {
+    const report = async (name, ok, value, args) => {
       steps.push({name, ok});
+      if (name !== 'done') await options.onHistoryStep?.({index: steps.length, name, ok, args, result: value});
       const preview = (typeof value === 'string' ? value : JSON.stringify(value) ?? '').replace(/\s+/g, ' ').slice(0, 60);
       options.onStep?.({index: steps.length, name, ok}, preview);
     };
@@ -89,7 +91,7 @@ function createAgent(sendViaUi) {
         // Let an in-flight send finish, but do not begin its tool after a stop request.
         checkRunning();
         if (lastAction.action === 'done') {
-          report('done', true, lastAction.summary);
+          await report('done', true, lastAction.summary);
           return {summary: lastAction.summary, steps};
         }
         try {
@@ -101,7 +103,7 @@ function createAgent(sendViaUi) {
         } catch (error) {
           previous = {ok: false, error: error.message};
         }
-        report(lastAction.name, previous.ok, previous.ok ? previous.result : previous.error);
+        await report(lastAction.name, previous.ok, previous.ok ? previous.result : previous.error, lastAction.args);
       }
       checkRunning();
       const error = new Error(`runTask exceeded maxSteps: steps=${steps.length}, lastAction=${JSON.stringify(lastAction)}`);
@@ -228,6 +230,20 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
   const postPanel = (id, event, payload = {}) => window.postMessage({
     type: 'cos-venice-panel-event', id, event, ...payload
   }, origin);
+  const historyText = value => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
+    return {text: text.slice(0, 64000), truncated: text.length > 64000};
+  };
+  const recordHistory = async event => {
+    // A lost acknowledgement retries the same history key; it never repeats the tool.
+    const once = async () => {
+      const reply = await callVeniceBridge('runEvent', {event});
+      if (reply?.recorded !== true) throw new Error('VENICE_HISTORY_SAVE_FAILED');
+      return reply;
+    };
+    try { return await once(); }
+    catch { return await once(); }
+  };
   window.addEventListener('message', event => {
     if (event.source !== window || event.origin !== origin || event.data?.type !== 'cos-venice-panel-request') return;
     const message = event.data;
@@ -256,7 +272,7 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
     postPanel(message.id, 'awaiting');
     void (async () => {
       stopExecObservers();
-      const grant = await callVeniceBridge('requestGrant', {instructionSummary:message.instruction.slice(0,1000)});
+      const grant = await callVeniceBridge('requestGrant', {instructionSummary:message.instruction.slice(0,1000), instruction:message.instruction});
       if (state.cancelled) { await callVeniceBridge('revokeLocal'); throw Object.assign(new Error('タスクを停止しました。'),{code:'VENICE_TASK_STOPPED'}); }
       retainedGrant = {id:message.id,runId:grant.runId};
       postPanel(message.id, 'granted', {runId:grant.runId});
@@ -264,6 +280,14 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
       return window.__cosVeniceAgent.runTask(message.instruction, {
         maxSteps: message.maxSteps,
         onStep: (step, preview) => postPanel(message.id, 'step', {step, preview}),
+        onHistoryStep: async step => {
+          if (state.cancelled) return;
+          // Successful Core calls already have canonical app-recorded arguments/results.
+          if (step.ok && step.name.startsWith('core/')) return;
+          const args = historyText(step.args), result = historyText(step.result);
+          await recordHistory({type: 'step', index: step.index, name: step.name, ok: step.ok,
+            args: args.text, result: result.text, truncated: args.truncated || result.truncated});
+        },
         onFindResult: result => postPanel(message.id, 'find-result', result),
         onExecOutput: event => { if (!state.cancelled) postPanel(message.id, 'exec-output', event); },
         onPatchPreview: preview => new Promise((resolve, reject) => {
@@ -274,9 +298,18 @@ if (location.origin === 'https://venice.ai' && !window.__cosVeniceAgent) {
           postPanel(message.id, 'patch-preview', {...preview, previewId: id});
         })
       });
-    })().then(result => postPanel(message.id, 'done', {summary:result.summary}), error => {
+    })().then(async result => {
+      if (state.cancelled) { postPanel(message.id, 'stopped'); return; }
+      const summary = historyText(result.summary);
+      await recordHistory({type: 'completed', message: summary.text, truncated: summary.truncated});
+      postPanel(message.id, 'done', {summary:result.summary});
+    }, async error => {
+      if (!state.cancelled && retainedGrant?.id === state.id) {
+        const failure = historyText(error.message);
+        await recordHistory({type: 'failed', message: failure.text, truncated: failure.truncated});
+      }
       postPanel(message.id, state.cancelled || error.code === 'VENICE_TASK_STOPPED' ? 'stopped' : 'error', {error:error.message});
-    }).finally(() => { if (panelTask === state) panelTask = null; });
+    }).catch(error => postPanel(message.id, state.cancelled ? 'stopped' : 'error', {error:error.message})).finally(() => { if (panelTask === state) panelTask = null; });
   });
   postPanel(null, 'ready');
 }

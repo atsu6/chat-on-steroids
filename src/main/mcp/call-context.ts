@@ -90,6 +90,7 @@ export interface HostAdmittedOrigin {
   exec?: import('../venice-exec.js').VeniceExecLease;
   tool?: 'read' | 'find' | 'apply_patch' | 'exec_command' | 'write_stdin';
   runId: string;
+  callId?: string;
   sessionId: string;
   roots: Root[];
   current(): boolean;

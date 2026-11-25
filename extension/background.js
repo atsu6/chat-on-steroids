@@ -5798,7 +5798,7 @@ async function handleVeniceBridge(message, sender) {
     return {ok: false, error: 'Venice bridge sender is not authorized'};
   }
   startVeniceGrantLifecycle();
-  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument', 'previewPatch', 'execOutput'].includes(message.op)) {
+  if (['localIdentity', 'setLocalRun', 'localTool', 'requestGrant', 'revokeLocal', 'localDocument', 'previewPatch', 'execOutput', 'runEvent'].includes(message.op)) {
     if (typeof sender.documentId !== 'string' || !sender.documentId) throw new Error('Venice document identity is missing');
     const brain = await chrome.tabs.get(sender.tab.id);
     if (!isVeniceBridgeUrl(brain.url) || brain.pendingUrl) throw new Error('Venice brain tab has navigated away');
@@ -5829,7 +5829,8 @@ async function handleVeniceBridge(message, sender) {
       await serializeTab(sender.tab.id, () => chrome.storage.session.set({[bindingKey]: {documentId: sender.documentId, requestId, cancelled: false}}));
       const reply = await call('/venice/grant/request', {method: 'POST', timeoutMs: 125_000, body: JSON.stringify({
         sender: source, tabUrl: sender.url, requestId, tools: ['core/read', 'core/find'],
-        instructionSummary: String(message.args?.instructionSummary ?? '').slice(0, 1000)
+        instructionSummary: String(message.args?.instructionSummary ?? '').slice(0, 1000),
+        ...(typeof message.args?.instruction === 'string' ? {instruction: message.args.instruction} : {})
       })});
       const accepted = await serializeTab(sender.tab.id, async () => {
         const binding = (await chrome.storage.session.get(bindingKey))[bindingKey];
@@ -5846,6 +5847,11 @@ async function handleVeniceBridge(message, sender) {
     }
     const runId = (await chrome.storage.session.get(runKey))[runKey];
     if (typeof runId !== 'string') throw new Error('先に app の grant を設定してください。');
+    if (message.op === 'runEvent') {
+      const reply = await call('/venice/run/event', {method: 'POST', body: JSON.stringify({sender: source, runId, event: message.args?.event})});
+      if (!reply.ok) throw new Error('VENICE_HISTORY_SAVE_FAILED');
+      return {ok: true, result: reply.data};
+    }
     const args = message.args ?? {};
     if (args.surface !== 'core' || !['read', 'find', 'apply_patch', 'exec_command', 'write_stdin'].includes(args.tool) || (message.op === 'previewPatch' && args.tool !== 'apply_patch') || (message.op === 'execOutput' && args.tool !== 'exec_command')) throw new Error('Tool is not available on the Venice gateway');
     const reply = await call('/venice/tools', {method: 'POST', body: JSON.stringify({sender: source,

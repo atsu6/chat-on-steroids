@@ -4128,5 +4128,16 @@
   "The storage dialog shows what one chat uses and frees its images or long texts.": "The storage dialog shows what one chat uses and frees its images or long texts.",
   "Safer after a crash": "Safer after a crash",
   "Restored {0} of {1} files|one": "Restored {0} of {1} file",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.",
+  "Venice task started": "Venice task started",
+  "Venice task completed": "Venice task completed",
+  "Venice task failed": "Venice task failed",
+  "Venice task stopped": "Venice task stopped",
+  "Venice task interrupted by app restart": "Venice task interrupted by app restart",
+  "Venice step {0}: {1}": "Venice step {0}: {1}",
+  "Venice run {0}": "Venice run {0}",
+  "Reported by the Venice page": "Reported by the Venice page",
+  "Page report truncated at 64,000 characters.": "Page report truncated at 64,000 characters.",
+  "Succeeded": "Succeeded",
+  "Run permission was revoked. No further steps will run.": "Run permission was revoked. No further steps will run."
 }

@@ -3356,12 +3356,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
   if (noteBrowserSeen(req)) changed();
 
-  if (route.startsWith('/venice/grant/') && req.method === 'POST') {
+  if ((route.startsWith('/venice/grant/') || route === '/venice/run/event') && req.method === 'POST') {
     const body = await readBody(req) as Record<string, unknown>;
     const source = body && typeof body === 'object' ? body.sender : null;
     const sender = veniceSenderSchema.safeParse({ ...(source && typeof source === 'object' ? source : {}), browserId: browserOf(req) });
     if (!sender.success) return json(res, 400, { error: 'invalid_venice_sender' }, origin);
     try {
+      if (route === '/venice/run/event') return json(res, 200, await veniceToolGateway.runEvent({ runId: body.runId, event: body.event }, sender.data), origin);
       if (route === '/venice/grant/request') {
         const { sender: _sender, tabUrl, ...request } = body;
         if (typeof tabUrl !== 'string') return json(res, 400, { error: 'invalid_venice_tab' }, origin);

@@ -78,6 +78,11 @@ export interface VeniceGrantPending {
 }
 export type VeniceGrantReply = { runId: string } | { error: string };
 
+/** Browser-authored history is presentation data, never permission or proof of tool execution. */
+export type VeniceRunEvent =
+  | { type: 'started' | 'completed' | 'failed' | 'stopped' | 'interrupted'; message: string; truncated?: boolean }
+  | { type: 'step'; index: number; name: string; ok: boolean; args: string; result: string; truncated: boolean };
+
 
 /** Bounded cumulative process output, not an stdin/continuation capability. */
 export interface VeniceExecOutput {

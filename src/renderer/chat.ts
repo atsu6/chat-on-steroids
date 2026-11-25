@@ -1113,6 +1113,7 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  */
 /** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
+  if (!summary.conversationId && summary.veniceRuns !== undefined) return summary.veniceRuns.length > 0;
   return sessionWorkingAt(summary, Date.now());
 }
 
@@ -5802,6 +5803,7 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
     t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
   raw.append(facts);
+  if (call.venice) raw.append(el('p', 'raw-facts', () => t('Venice run {0}', [call.venice!.runId])));
 
   const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
   const current = () => context ? context.current() : ownerId === selectedId && generation === selectionGeneration;
@@ -5933,6 +5935,35 @@ function trustNoticeText(text: string): string {
   if (text === UNTRUSTED_WORKER_NOTICE) return t("A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.");
   if (text === UNPROVEN_WORKER_NOTICE) return t("A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.");
   return text;
+}
+
+function veniceRunBody(event: Extract<SessionEvent, { kind: 'note' }>): HTMLElement {
+  const run = event.venice!;
+  const box = document.createElement('details'); box.className = 'tool'; box.dataset.veniceRun = run.runId;
+  box.open = run.phase !== 'step';
+  const head = document.createElement('summary');
+  head.append(icon('i-terminal', 'ico tool-ico'));
+  const title = () => {
+    switch (run.phase) {
+      case 'started': return t('Venice task started');
+      case 'completed': return t('Venice task completed');
+      case 'failed': return t('Venice task failed');
+      case 'stopped': return t('Venice task stopped');
+      case 'interrupted': return t('Venice task interrupted by app restart');
+      case 'step': return t('Venice step {0}: {1}', [run.step!.index, run.step!.name]);
+    }
+  };
+  head.append(el('b', '', title));
+  if (run.step) head.append(el('em', '', () => run.step!.ok ? t('Succeeded') : t('Failed')));
+  const body = el('div', 'raw');
+  body.append(el('p', 'raw-facts', () => t('Venice run {0}', [run.runId])));
+  if (['step', 'completed', 'failed'].includes(run.phase)) body.append(el('p', 'meta', () => t('Reported by the Venice page')));
+  if (run.args) body.append(el('strong', '', () => t('Arguments')), textBlock('pre', run.args.text, run.args.truncated, run.args.chars));
+  if (run.step) body.append(el('strong', '', () => t('Result')));
+  if (event.message.text) body.append(textBlock('pre', event.message.text, event.message.truncated, event.message.chars));
+  if (run.phase === 'stopped') body.append(el('p', 'meta', () => t('Run permission was revoked. No further steps will run.')));
+  if (run.truncated) body.append(el('p', 'meta', () => t('Page report truncated at 64,000 characters.')));
+  box.append(head, body); return box;
 }
 
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
@@ -6120,6 +6151,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'tool_call':
       return toolBody(event, context);
     case 'note':
+      if (event.venice) return veniceRunBody(event);
       return el('p', 'meta', event.message.text);
     /**
      * Rendered rather than left to fall through to "Unknown event".
@@ -7213,7 +7245,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.kind === 'earlier' ? item.fold.time : item.block.time);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind) &&
-        !stoppedTurnEnd(item.event, events)) continue;
+        !stoppedTurnEnd(item.event, events) && !(item.event.kind === 'note' && item.event.venice)) continue;
     const key = itemKey(item);
     const answerTurn = item.kind === 'event' && item.event.kind === 'assistant_message' && item.event.turnId &&
       anchors.get(item.event.turnId) === item.event.seq ? item.event.turnId : null;
@@ -7561,7 +7593,7 @@ function paintRecoveryRows(): boolean {
 /** Per shown stop note: how long the chat's newest answer was when the note first showed. */
 const verdictAnswerChars = new Map<string, number>();
 function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
-  const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
+  const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation && !event.venice) : undefined;
   if (verdict?.kind !== 'note') return false;
   const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
   // An answer begun before the note that keeps growing is the chat working (CodeRabbit on #2062): its
@@ -8353,6 +8385,11 @@ function workingLabel(turnId: string, elapsedSeconds: number): string {
 }
 
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?: boolean; ticking?: boolean } {
+  const venice = sessions.find(entry => entry.id === selectedId);
+  if (detailFor === selectedId && !venice?.conversationId && venice?.veniceRuns !== undefined) {
+    const working = venice.veniceRuns.length > 0;
+    return { text: working ? t('Working…') : '', tone: '', working };
+  }
   if (!deps.state()?.config.ui.developerMode) {
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };

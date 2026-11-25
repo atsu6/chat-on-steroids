@@ -14,6 +14,7 @@
     ui.maxSteps.disabled = Boolean(activeId);
   }
   function message(text) {
+    if (text === 'VENICE_HISTORY_SAVE_FAILED') text = t('venice_history_save_failed', '履歴を保存できなかったため、次のステップには進みません。停止ボタンでrunを終了できます。');
     ui.message.textContent = text;
     ui.message.hidden = !text;
   }

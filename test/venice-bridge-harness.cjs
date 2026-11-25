@@ -20,7 +20,8 @@ const senderFor = id => ({id: 'synthetic-extension', tab: {id}, frameId: 0,
 const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation = false, timers, localTransport} = {}) {
+function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation = false, timers, localTransport, historyTransport} = {}) {
+  const historyRequests = [];
   const workDom = new JSDOM(html, {url: 'https://example.test/', runScripts: 'outside-only'});
   t.after(() => workDom.window.close());
   workDom.window.fetch = () => assert.fail('No network is allowed');
@@ -81,6 +82,10 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
     browserId: 'a'.repeat(32), load: async () => {},
     call: async (path, ...args) => {
       if (path === '/venice/grant/document') return {ok:true,data:{ok:true}};
+      if (path === '/venice/run/event') {
+        historyRequests.push(JSON.parse(args[0].body));
+        return historyTransport ? historyTransport(path, ...args) : {ok:true,data:{recorded:true}};
+      }
       if (localTransport) return localTransport(path, ...args);
       return (async () => {
       if (path === '/venice/grant/request') return {ok:true,data:{runId:'11111111-1111-4111-8111-111111111111'}};
@@ -96,7 +101,7 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
   const send = (message, sender = senderFor(1)) => new Promise(resolve => {
     assert.equal(listener(message, sender, resolve), message.type === 'unknown' ? false : true);
   });
-  return {chrome: api, w: workDom.window, store, tabs: tabMap, calls, updates, removals,
+  return {chrome: api, w: workDom.window, store, tabs: tabMap, calls, updates, removals, historyRequests,
     send, request: (op, args, sender) => send({type: 'cos-venice-bridge', op, args}, sender),
     complete(id, url) {
       const tab = tabMap.get(id);
@@ -106,8 +111,8 @@ function worker(t, {html = '', owned = false, storage = {}, tabs, slowNavigation
     }};
 }
 
-function agentHarness(t, {replies = [], html = '', owned = false, localTransport} = {}) {
-  const h = worker(t, {html, owned, localTransport});
+function agentHarness(t, {replies = [], html = '', owned = false, localTransport, historyTransport} = {}) {
+  const h = worker(t, {html, owned, localTransport, historyTransport});
   const brainDom = new JSDOM('<textarea>brain must stay untouched</textarea><button id="brain">brain</button>', {
     url: 'https://venice.ai/chat/synthetic', runScripts: 'outside-only'
   });

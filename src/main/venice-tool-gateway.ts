@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import type { VeniceRunGrant, VeniceToolCallRequest, VeniceToolCallResponse, VeniceGrantPending, VeniceGrantReply } from '../shared/venice-integration.js';
+import type { VeniceRunGrant, VeniceToolCallRequest, VeniceToolCallResponse, VeniceGrantPending, VeniceGrantReply, VeniceRunEvent } from '../shared/venice-integration.js';
+import { recordVeniceRun } from './session/recorder.js';
 import type { Root } from '../shared/types.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
@@ -27,19 +28,27 @@ const responseSchema = z.object({
 const recordSchema = z.object({ request: requestSchema, sender: veniceSenderSchema, response: responseSchema });
 type CallRecord = z.infer<typeof recordSchema>;
 type Grant = { value: VeniceRunGrant; sender: VeniceSender; active: boolean; roots: Root[]; configured: boolean };
-type Approval = { id: string; key: string; sender: VeniceSender; view: VeniceGrantPending | null;
+type Approval = { id: string; key: string; sender: VeniceSender; view: VeniceGrantPending | null; instruction: string;
   roots: Root[]; answering: boolean; reply: Promise<VeniceGrantReply>; finish(reply: VeniceGrantReply): void; timer: ReturnType<typeof setTimeout> };
 type ApprovalUi = {
   context(): Promise<Pick<VeniceGrantPending, 'sessionId' | 'sessionTitle' | 'project'>>;
   notify(pending: VeniceGrantPending[]): void;
 };
 export const veniceGrantRequestSchema = z.object({ requestId: z.string().uuid(),
-  tools: z.union([z.tuple([z.literal('core/read')]), z.tuple([z.literal('core/read'), z.literal('core/find')])]), instructionSummary: z.string().trim().min(1).max(1000) }).strict();
+  tools: z.union([z.tuple([z.literal('core/read')]), z.tuple([z.literal('core/read'), z.literal('core/find')])]), instructionSummary: z.string().trim().min(1).max(1000), instruction: z.string().max(1_000_000).optional() }).strict();
+const browserRunEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('step'), index: z.number().int().min(1).max(40), name: z.string().min(1).max(100), ok: z.boolean(),
+    args: z.string().max(64000), result: z.string().max(64000), truncated: z.boolean() }).strict(),
+  z.object({ type: z.literal('completed'), message: z.string().max(64000), truncated: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal('failed'), message: z.string().max(64000), truncated: z.boolean().optional() }).strict()
+]);
 type Dependencies = {
   load(): Promise<unknown>;
   save(records: CallRecord[]): Promise<void>;
   execute(request: VeniceToolCallRequest, grant: VeniceRunGrant, current: () => boolean, roots?: Root[], preview?: boolean, exec?: VeniceExecLease): Promise<unknown>;
   saveGrants?(grants: unknown[]): Promise<void>;
+  recordRun?(grant: VeniceRunGrant, event: VeniceRunEvent): Promise<void>;
+  recoverHistory?(): Promise<void>;
 };
 const refusal = (callId: string, error: string): VeniceToolCallResponse => ({ callId, state: 'unknown', error });
 
@@ -55,6 +64,41 @@ export class VeniceToolGateway {
   private approvalUi: ApprovalUi | null = null;
   private approvals = new Map<string, Approval>();
   private grantSaves: Promise<void> = Promise.resolve();
+  private historyWrites: Promise<void> = Promise.resolve();
+  private historyFailure: unknown = null;
+  private historyEvents = new Map<string, Map<string, VeniceRunEvent>>();
+
+  private recordRun(grant: VeniceRunGrant, event: VeniceRunEvent): Promise<void> {
+    const next = this.historyWrites.then(async () => {
+      let events = this.historyEvents.get(grant.runId);
+      if (!events) { events = new Map(); this.historyEvents.set(grant.runId, events); }
+      // A completed model task stays completed when Stop later kills a retained process.
+      if (events.has('terminal')) return;
+      const key = event.type === 'step' ? `step:${event.index}` : event.type === 'started' ? 'started' : 'terminal';
+      const previous = events.get(key);
+      if (previous) {
+        if (!isDeepStrictEqual(previous, event)) throw new Error('VENICE_HISTORY_CONFLICT');
+        return;
+      }
+      await this.deps.recordRun?.(grant, event);
+      events.set(key, structuredClone(event));
+    });
+    this.historyWrites = next.catch(() => undefined);
+    return next;
+  }
+
+  /** Presentation-only reports; no grant, tool call or authority is restored by this route. */
+  async runEvent(input: unknown, source: unknown): Promise<{ recorded: true }> {
+    const { runId, event } = z.object({ runId: z.string().uuid(), event: browserRunEventSchema }).strict().parse(input);
+    const sender = veniceSenderSchema.parse(source);
+    await this.initialize();
+    const grant = this.grants.get(runId);
+    if (!grant || !isDeepStrictEqual(grant.sender, sender)) throw new Error('RUN_NOT_AUTHORIZED');
+    if (!grant.active || this.stopped) throw new Error('RUN_REVOKED');
+    if (grant.configured && !grant.roots.every(root => getConfig().roots.some(live => !live.remote && live.path === root.path && live.name === root.name))) throw new Error('RUN_REVOKED');
+    await this.recordRun(grant.value, event);
+    return { recorded: true };
+  }
 
   setApprovalUi(ui: ApprovalUi): void { this.approvalUi = ui; }
   pendingApprovals(): VeniceGrantPending[] {
@@ -76,7 +120,7 @@ export class VeniceToolGateway {
     if (this.stopped || !this.approvalUi || this.approvals.size >= 8) return Promise.resolve({ error: 'アプリで承認画面を開けません。' });
     let finish!: (reply: VeniceGrantReply) => void;
     const reply = new Promise<VeniceGrantReply>(resolve => { finish = resolve; });
-    const row: Approval = { id: randomUUID(), key: request.requestId, sender, view: null, roots: [], answering: false,
+    const row: Approval = { id: randomUUID(), key: request.requestId, sender, view: null, instruction: request.instruction ?? request.instructionSummary, roots: [], answering: false,
       reply, finish, timer: setTimeout(() => this.finishApproval(row, { error: '承認待ちが時間切れになりました。' }), 120_000) };
     row.timer.unref?.();
     this.approvals.set(row.id, row);
@@ -112,7 +156,7 @@ export class VeniceToolGateway {
         if (await validateNewRoot(root.path, []) !== root.path) throw new Error('venice_folder_changed');
       }
       if (!this.approvals.has(id)) throw new Error('venice_approval_unavailable');
-      const grant = await this.grantWithRoots(row.view.sessionId, row.roots, row.sender, false, write, shell, row.view.tools.length === 2);
+      const grant = await this.grantWithRoots(row.view.sessionId, row.roots, row.sender, false, write, shell, row.view.tools.length === 2, row.instruction);
       if (!this.approvals.has(id)) { this.revoke(grant.runId); return; }
       this.finishApproval(row, { runId: grant.runId });
     } finally { row.answering = false; }
@@ -136,13 +180,13 @@ export class VeniceToolGateway {
   initialize(): Promise<void> {
     if (!this.ready) this.ready = (async () => {
       const stored = await this.deps.load();
-      if (stored === null) return;
-      const rows = z.array(recordSchema).max(256).parse(stored);
+      const rows = stored === null ? [] : z.array(recordSchema).max(256).parse(stored);
       for (const row of rows) {
         if (this.records.has(row.request.callId) || row.response.callId !== row.request.callId) throw new Error('VENICE_LEDGER_INVALID');
         if (row.response.state === 'pending') row.response = refusal(row.request.callId, 'OUTCOME_UNKNOWN');
         this.records.set(row.request.callId, row);
       }
+      await this.deps.recoverHistory?.();
     })();
     return this.ready;
   }
@@ -164,7 +208,7 @@ export class VeniceToolGateway {
     return this.grantWithRoots(sessionId, config.roots.filter(root => approved.includes(root.path)), sender, true, write, shell, find);
   }
 
-  private async grantWithRoots(sessionId: string, roots: Root[], sender: VeniceSender, configured: boolean, write = false, shell = false, find = false): Promise<VeniceRunGrant> {
+  private async grantWithRoots(sessionId: string, roots: Root[], sender: VeniceSender, configured: boolean, write = false, shell = false, find = false, instruction = ''): Promise<VeniceRunGrant> {
     await this.initialize();
     const session = await getSession(sessionId);
     if (!session || session.conversationId || session.endedAt || this.stopped || this.grants.size >= 32) throw new Error('venice_grant_unavailable');
@@ -173,7 +217,7 @@ export class VeniceToolGateway {
       ...(write ? { write: true } : {}), ...(shell ? { shell: true } : {}) };
     const grant: Grant = { value, sender: veniceSenderSchema.parse(sender), active: true, roots: structuredClone(roots), configured };
     this.grants.set(value.runId, grant);
-    try { await this.saveGrants(); }
+    try { await this.saveGrants(); await this.recordRun(value, { type: 'started', message: instruction }); }
     catch { grant.active = false; throw new Error('venice_grant_not_durable'); }
     if (!grant.active || this.stopped) throw new Error('venice_run_revoked');
     return structuredClone(value);
@@ -184,6 +228,7 @@ export class VeniceToolGateway {
     if (!grant) return false;
     grant.active = false;
     this.execRuns.revoke(runId);
+    void this.recordRun(grant.value, { type: 'stopped', message: '' }).catch(error => { this.historyFailure = error; });
     void this.saveGrants().catch(() => undefined);
     return true;
   }
@@ -194,7 +239,7 @@ export class VeniceToolGateway {
   async stop(): Promise<void> {
     this.stopped = true; this.revokeAll();
     await Promise.allSettled([...this.reservations.values()].map(row => row.reply));
-    await this.execRuns.drain();
+    await this.waitForRevocation();
     await this.saves; await this.grantSaves;
   }
 
@@ -259,7 +304,10 @@ export class VeniceToolGateway {
     if (!admission.current()) throw new Error('RUN_REVOKED');
     return boundVeniceExecOutput(shielded.structuredContent as unknown as import('../shared/venice-integration.js').VeniceExecOutput);
   }
-  async waitForRevocation(): Promise<void> { await this.execRuns.drain(); }
+  async waitForRevocation(): Promise<void> {
+    await this.execRuns.drain(); await this.historyWrites;
+    if (this.historyFailure) { const error = this.historyFailure; this.historyFailure = null; throw error; }
+  }
 
   private async admit(request: VeniceToolCallRequest, sender: VeniceSender): Promise<VeniceToolCallResponse> {
     try { await this.initialize(); }
@@ -322,11 +370,21 @@ async function executeLocalTool(request: VeniceToolCallRequest, grant: VeniceRun
     exposedFind: true, sessionTools: false, agentTools: false }, 'core');
   registerCoreTools(reg);
   return reg.invokeHostAdmitted(request.tool, args, { type: 'venice', read: grant.tools.includes('core/read'), write: grant.write === true, shell: grant.shell === true, stdinOpen, exec, preview, runId: grant.runId,
-    sessionId: grant.sessionId, roots, current });
+    sessionId: grant.sessionId, callId: request.callId, roots, current });
+}
+
+/** Recover presentation only. Persisted grants are never loaded into the authority map. */
+export async function recoverVeniceRunHistory(): Promise<void> {
+  const rows = await readDurable<unknown>('venice-grants', { strict: true });
+  if (rows === null) return;
+  const saved = z.array(z.object({ value: z.object({ runId: z.string().uuid(), sessionId: z.string().min(1) }) })).max(32).parse(rows);
+  for (const { value } of saved) if (await getSession(value.sessionId)) await recordVeniceRun(value.sessionId, value.runId, { type: 'interrupted', message: '' });
 }
 
 export const veniceToolGateway = new VeniceToolGateway({
   load: () => readDurable('venice-tools', { strict: true }),
   save: rows => writeDurableNow('venice-tools', rows), execute: executeLocalTool,
-  saveGrants: rows => writeDurableNow('venice-grants', rows)
+  saveGrants: rows => writeDurableNow('venice-grants', rows),
+  recordRun: (grant, event) => recordVeniceRun(grant.sessionId, grant.runId, event),
+  recoverHistory: recoverVeniceRunHistory
 });

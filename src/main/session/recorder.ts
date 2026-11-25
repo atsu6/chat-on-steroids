@@ -39,7 +39,7 @@ import { continuedRequestTurn, effectiveFinalTurnId, overlappingRequestTurns, re
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 import { requestTraceNote } from './request-trace.js';
-import { redactCredentialText } from '../redaction.js';
+import { redactCredentialText, redactSecretText } from '../redaction.js';
 import { currentCall, emptyEvidence, runningToolCalls, type CallEvidence } from '../mcp/call-context.js';
 import {
   MAX_MESSAGE_CHARS,
@@ -1374,7 +1374,7 @@ export interface ToolContentPart {
 
 export interface ToolCallInput {
   /** Trusted in-process admission, distinct from a ChatGPT request-id proof. */
-  hostAdmitted?: { runId: string; sessionId: string };
+  hostAdmitted?: { runId: string; sessionId: string; callId?: string };
   /** Provenance captured at admission, retained if native proof changes during execution. */
   providerSessionAnchor?: string;
   /** Captured before the handler. Presentation only; never binds caller or agent identity. */
@@ -1726,6 +1726,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     }
 
     const call: ToolCallRecord = {
+      ...(input.hostAdmitted?.callId ? { venice: { runId: input.hostAdmitted.runId, callId: input.hostAdmitted.callId } } : {}),
       ...(input.nested === true ? { nested: true } : {}),
       ...((target.attribution === 'request_id' || target.attribution === 'generation') && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
         ? { process: { sessionId: evidence.processSessionId } } : {}),
@@ -3239,6 +3240,25 @@ async function recordChatObservationsNow(
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
   notifyExtensionChanged(sessionId);
   return { sessionId, stored, activity, goalCandidates };
+}
+
+/** App-owned run identity with explicitly labelled browser-authored presentation data. */
+export async function recordVeniceRun(
+  sessionId: string, runId: string, event: import('../../shared/venice-integration.js').VeniceRunEvent
+): Promise<void> {
+  if (!recordingEnabled()) return;
+  if (event.type === 'interrupted') {
+    const history = (await readEvents(sessionId, { kinds: ['note'] })).filter(row => row.kind === 'note' && row.venice?.runId === runId);
+    if (!history.length || history.some(row => row.kind === 'note' && row.venice && !['started', 'step'].includes(row.venice.phase))) return;
+  }
+  const clean = (value: string) => redactSecretText(value.replace(/\0/g, ' '));
+  const body = event.type === 'step' ? event.result : event.message;
+  await appendEvent(sessionId, {
+    time: Date.now(), source: 'app', kind: 'note',
+    venice: { runId, phase: event.type, ...(event.truncated ? { truncated: true } : {}), ...(event.type === 'step' ? { step: { index: event.index, name: event.name, ok: event.ok }, args: await storeText(sessionId, clean(event.args), 4000) } : {}) },
+    message: await storeText(sessionId, clean(body), 4000)
+  });
+  notifyChanged(sessionId);
 }
 
 /** Records something the app itself decided, e.g. a saved handoff. */

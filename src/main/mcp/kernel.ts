@@ -1651,7 +1651,7 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
           delivered = veniceExecResult(delivered.structuredContent as unknown as import('../../shared/venice-integration.js').VeniceExecOutput);
         }
         if (origin.preview) return delivered;
-        await recordToolCall({ hostAdmitted: { runId: origin.runId, sessionId: origin.sessionId },
+        await recordToolCall({ hostAdmitted: { runId: origin.runId, sessionId: origin.sessionId, callId: origin.callId },
           tool: name, args, content: delivered.content, outcome: context.outcome ?? (delivered.isError ? 'tool_rejected' : 'ok'),
           durationMs: Date.now() - context.startedAt, startedAt: context.startedAt, evidence: context.evidence });
         context.publication!.completedAt = Date.now();

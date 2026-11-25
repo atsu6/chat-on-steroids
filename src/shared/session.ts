@@ -251,6 +251,8 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
 };
 
 export interface ToolCallRecord {
+  /** Host-approved Venice run and wire call, independent of this recording's UUID. */
+  venice?: { runId: string; callId: string };
   /** Internal code-mode invocation: retained for audit, never a separate model exchange. */
   nested?: boolean;
   /** Child lifetime, independent of the initial tool response and output delivery. */
@@ -560,7 +562,10 @@ export type SessionEvent =
    * An app-authored line. `continuation` names the Compact & Resume it is about, so the
    * timeline can fold the note into that compaction's one row instead of showing it loose.
    */
-  | (BaseEvent & { kind: 'note'; message: StoredText; continuation?: string })
+  | (BaseEvent & { kind: 'note'; message: StoredText; continuation?: string;
+      /** Page reports are explicitly labelled and cannot create caller/turn authority. */
+      venice?: { runId: string; phase: 'started' | 'step' | 'completed' | 'failed' | 'stopped' | 'interrupted';
+        step?: { index: number; name: string; ok: boolean }; args?: StoredText; truncated?: boolean } })
   /**
    * A message routed between agents.
    *
@@ -834,6 +839,8 @@ export interface SessionSummary {
   lastTurnOutcome: TurnOutcome | null;
   /** Durable open-turn projection. Undefined only on pre-1.8.8 metadata. */
   activeTurnId?: string | null;
+  /** Active app-approved Venice tasks; absent on sessions without Venice lifecycle history. */
+  veniceRuns?: string[];
   /** A pre-Send automatic handoff refusal lasts until a different turn or frontend. */
   autoCompactionRefusal?: { conversationId: string; turnId: string | null };
   /** Constant-size projection of app finish receipts for the most recently started turn. */
