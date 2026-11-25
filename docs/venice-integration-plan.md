@@ -15,6 +15,7 @@ readの承認UIを実装し、パネルからのgrant要求・ネイティブフ
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
 初回のread接続は§10–11、apply_patch接続は§12、exec接続は§13、find接続は§14、stdin / poll接続は§15。
 現在地と以降のロードマップは `venice-progress.md` を参照する。
+パネルで開始したrunの履歴表示・記録は§16を参照する。
 
 ## 1. agent map の要約（8行）
 
@@ -669,3 +670,45 @@ unknownは停止理由として返し、新しいcall IDを作ってやり直さ
 `node test/venice-write-stdin.visual.cjs`はビルド不要、Node 22.23.5・lockfile依存関係・macOSのChromeを前提とし、
 外部通信をローカル応答/abortに限定してPC/モバイル表示、改行、安全な文字列表示、横スクロールを確認する。
 ログと画面は`outputs/venice-write-stdin/`。実Venice送信は行わない。
+
+## 16. Veniceタスクの履歴UI（2026-11-25）
+
+承認画面で示されたローカルsessionをElectronのチャット一覧から開くと、指示・実行結果・終了理由を追える。
+既存タイムラインの折り畳み行を使い、再表示や再起動でツールを実行し直さない。
+
+- 開始時の指示、DOM等のページ側ステップ、完了・失敗・停止・再起動中断を、既存sessionの`note`へ保存する。
+  `note.venice`のrunId / phaseを表示用に使う。ChatGPTのmessage / turn / conversation IDは作らない。
+- `core/*`の成功は既存kernel / recorderの実記録を再利用する。`call.venice`へrunIdとwire callIdを添え、同じ結果をページ報告として二重表示しない。
+  gatewayで拒否された呼び出しとDOMステップはページ報告として残し、UIで「Veniceページからの報告」と区別する。
+  この報告はツールの実行証明や権限には使わない。
+- 承認要求の任意`instruction`に元の指示を載せる。従来の`instructionSummary`だけの呼び出しも受け付ける。
+  新しい指示は最大1,000,000文字、ステップ引数・結果・終了報告はそれぞれ最大64,000文字。
+  ページ側で切り詰めた報告は明示する。既存のinline上限を超えるテキストはassetへ保存し、通常の`StoredText`で参照する。
+  既存の秘密値パターン除去とNULの空白置換を、inline / overflow保存前に適用する。
+- `/venice/run/event`は既存bridgeの認証とChrome由来のsender / document、app発行のrunを照合する。
+  受け付けるのはstep / completed / failedの表示データのみ。クライアントがsessionを選んだりgrantを新造したりする入口はない。
+  未終了runの同じstep indexの同じ報告は再保存せず、内容が変わった再利用は拒否する。
+  最初の終了を保持し、終了済みrunへの後続報告では履歴を変更しない。
+- 各ステップの保存ACKが来てから次のmodel turnへ進む。ACKを失った場合の再試行は同じ履歴報告だけで、ツールを再実行しない。
+  保存不能はパネルに表示して次のステップを止める。生存プロセスは既存のStopで終了できる。
+- Stop / navigation / disconnect / app終了で失効したrunには停止を記録する。
+  すでに完了・失敗したタスクを、残ったプロセスの停止で別の終了状態へ書き換えない。
+  起動時は過去のgrant記録を履歴照合にだけ使い、開始だけ残るrunに中断を記録する。grant・stdin所有権・処理は復元しない。
+- `SessionSummary.veniceRuns`は未終了のタスクID一覧。複数runを独立に更新し、ローカルVenice sessionの作業中表示に使う。
+  通常のconversation付きsessionは従来の判定を保つ。タスク終了と生存shellプロセスの終了は別であり、grantや同時実行枠の判定には使わない。
+- 履歴記録は既存の`recordingEnabled()`に従う。2.1.55では旧configのrecord:falseも正規化され、記録は常時ONという現行仕様を保つ。
+  新しいUI文言はja / enに登録し、他言語は既存の英語fallbackを使う。
+
+検証は実store / kernel / 認証HTTPと合成ページ応答を使う。実Veniceへは送信しない。
+実Electronの確認はビルド後、repoルートから次を実行する。Node 22.23.5、lockfile依存関係とmacOS GUIセッションが前提。
+各コマンドは別のElectronプロセスで、正のharnessは`test/venice-history.visual.cjs`。ソースを文書へ複製しない。
+
+```sh
+volta run --node 22.23.5 npm run build
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/venice-history.visual.cjs --seed
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/venice-history.visual.cjs --restore
+```
+
+専用userDataに合成履歴を作り、別プロセスでディスクから復元する。外部HTTP(S)は遮断し、通常アプリや開発サーバは再起動しない。
+英語・日本語、折り畳み、文字列の安全な表示、復元後の作業中表示、入力送信0を確認する。ログ・画像は`outputs/venice-history/`。
+対象はローカルのタスク履歴で、Veniceサーバの過去チャット取り込みではない。

@@ -1,6 +1,6 @@
 # Venice ロードマップと進捗
 
-0〜4・5・6は完了。追加の **4.5: attestation輸送は保留**。次は7の履歴UI。
+0〜7（4.5除く）は完了。追加の **4.5: attestation輸送は保留**。次は8の通知。
 
 ## 目標
 
@@ -9,16 +9,16 @@ Veniceへの指示から、ローカルのファイルを読み、検索・編�
 
 ## 現在地 — 2026-11-25
 
-**ローカルのコーディング基盤は揃った。次は作業履歴と通知を整え、実モデルで一連の作業が通るかを確かめる段階。**
+**ローカルのコーディング基盤と作業履歴は揃った。次は通知を整え、実モデルで一連の作業が通るかを確かめる段階。**
 
-- 実装済み: Web UI送信 / SSE、DOMツール、read、apply_patch、exec_command、write_stdin、find。
+- 実装済み: Web UI送信 / SSE、DOMツール、read、apply_patch、exec_command、write_stdin、find、履歴UI。
   read / write / shellの独立同意、所有権、失効、重複実行防止もローカル経路で検証している。
 - 検証の範囲: 実Veniceモデル経由のreadは先行E2Eで1回成功済み。
   追加のwrite / exec / stdin / findは実ファイル・実プロセス・認証HTTPと合成モデルで確認済み。
   **実Veniceで複数ツールを連ねた作業の成功率は、まだ測定していない。**
-- 最新の全体検証: Vitest **12,915 passed / 0 failed / 218 skipped**、
-  ファイル **529 passed / 0 failed / 20 skipped**。通常経路のCJSも**100 passed / 0 failed / 0 skipped**。
-  typecheck・build成功。基準実装は`1d1eb1bd`、検証記録は`199bf453`。このロードマップ作成時の再実行ではない。
+- 最新の全体検証: Vitest **12,931 passed / 0 failed / 218 skipped**、
+  ファイル **532 passed / 0 failed / 20 skipped**。通常経路のCJSも**100 passed / 0 failed / 0 skipped**。
+  typecheck・build成功。履歴UIの実装は`4aae9145`。別Electronプロセスでの履歴復元と日本語表示も確認した。
 
 ## ここからの順序
 
@@ -26,8 +26,8 @@ Veniceへの指示から、ローカルのファイルを読み、検索・編�
 
 | 順序 | キュー | できるようにすること | 完了の目安 |
 | --- | --- | --- | --- |
-| 次 | 7. 履歴UI | 指示、ツール実行、結果、失敗・停止理由を後から追える | 別runと混ざらず、再起動後も記録を表示できる。履歴を開いても再実行しない |
-| その次 | 8. 通知 | 完了・失敗・承認待ちに気付ける | 既存通知経路を再利用し、通知から正しい作業へ戻れる。重複・誤宛先がない |
+| 完了 | 7. 履歴UI | 指示、ツール実行、結果、失敗・停止理由を後から追える | 別runと混ざらず、再起動後も記録を表示できる。履歴を開いても再実行しない |
+| 次 | 8. 通知 | 完了・失敗・承認待ちに気付ける | 既存通知経路を再利用し、通知から正しい作業へ戻れる。重複・誤宛先がない |
 | 拡張1 | 9. Desktop AX観測 | 対象アプリのウィンドウと要素を構造化テキストで把握できる | 実機で権限・対象ウィンドウ・run所有者を照合でき、無許可や古い参照は拒否する |
 | 拡張2 | 10. Desktop画像 / vision | 対象画面をモデルの視覚入力として渡せる | ローカルpreviewだけでなく、モデルへの添付受付と画像内容の理解を実測する |
 | 仕上げ | 11. 総回帰 | 一連の作業と停止・復旧を通して使える | 実モデル・実アプリで各経路を確認し、失効・通信断・再起動で二重実行しない |
@@ -64,14 +64,14 @@ Desktopを増やす前に、現行のWeb UI送信で次の小さな作業を確�
 | 4.5. attestation輸送 — 保留 | 補助修正のみ `1ee5c67a` | 輸送本体・認証取得・401/403後の自動再送・実fetchのConsole手順は未実装。NUL除去と計画だけの応答への1回再試行のみ完了。詳細は `venice-attestation-status.md` |
 | 5. write_stdin — 完了 | `1d1eb1bd` | なし（追加15件。全体 529 passed / 0 failed / 20 skippedファイル、12,915 passed / 0 failed / 218 skippedテスト。2.1.55取込済み） |
 | 6. find — 完了 | `72b6daea`, `78d02537` | なし（追加16件、全体 523 passed / 0 failed） |
-| 7. 履歴UI — 未着手 | — | Venice履歴の表示・検証 |
+| 7. 履歴UI — 完了 | `4aae9145` | なし（追加16件。全体12,931成功・失敗0。実store・認証HTTP・実Electron再起動で確認） |
 | 8. 通知 — 未着手 | — | Venice通知の接続・検証 |
 | 9. Desktop AX観測 — 未着手 | — | AX観測・所有者・権限の検証 |
 | 10. Desktop画像 / vision — 未着手 | — | 画像添付とモデルの視覚入力の検証 |
 | 11. 総回帰 — 未着手 | — | 全機能が揃った時点での総回帰 |
 
 実送信の証拠と各段階の条件は `venice-findings.md` と `venice-integration-plan.md` を参照。
-3・4・5・6は実Venice送信なしのローカル・合成経路で検証する。4・5は独立したshell同意を使い、Desktopは追加しない。
+3・4・5・6・7は実Venice送信なしのローカル・合成経路で検証する。4・5は独立したshell同意を使い、Desktopは追加しない。
 
 ## 3の検証状況
 
@@ -140,3 +140,21 @@ Desktopを増やす前に、現行のWeb UI送信で次の小さな作業を確�
 - headlessでread+find承認、write/shell OFF、ja/enのscope、MAIN / ISOLATEDの結果表示、NUL除去、安全な文字列表示、
   打ち切り、PC/モバイル、横スクロール、axe違反0を確認した。実Venice送信は行っていない。
   ログと画像は`outputs/venice-find/`。仕様は`venice-integration-plan.md` §14を参照。
+
+## 7の検証状況
+
+- app承認済みのrunについて、指示・DOM等のステップ・終了報告を既存sessionのnoteへ保存する。
+  Coreの成功は既存kernelの実記録を再利用し、runId / wire callIdで対応付ける。
+  ページ報告は実行証明と区別して表示する。新しい履歴DBや任意IPCは追加していない。
+- grant / sender / documentを確認する表示データ専用routeを追加した。同じステップのACK再取得は重複保存せず、ツールも再実行しない。
+  保存不能はパネルに明示して次のステップを止める。初回の終了を保持し、Stopや再起動で処理・権限は復元しない。
+- 追加16テスト成功。既存テストの削除・skip追加・assert緩和はない。CJS harnessには新しい履歴transportの明示的なmockを追加した。
+- 初回全体テストは12,928成功だったが、実Electronで中断済みの履歴に「作業中」が残ることを発見した。
+  sessionへ未終了run一覧を投影し、複数runと通常のconversation付きsessionを分けて修正した。
+- 修正後の全体`npm test`は**532 passed / 0 failed / 20 skipped（552ファイル）**、
+  **12,931 passed / 0 failed / 218 skipped（13,149テスト）**。CJS6ファイルも**100 passed / 0 failed / 0 skipped**。
+- 最終コードのtypecheck・build・変更JSのnode --checkが成功。
+  実Electronのseed / restoreを別プロセスで実行し、英語5履歴行から日本語6履歴行への復元、
+  中断の記録、作業中表示の解消、入力送信0、ページエラー0を確認・目視した。実Venice送信は未実施。
+- 仕様と再実行コマンドは計画§16。正のharnessは`test/venice-history.visual.cjs`、ログ・画像は`outputs/venice-history/`。
+  対象はローカルのタスク履歴。Veniceサーバの過去チャット取り込みは含まない。次は8の通知。

@@ -2679,3 +2679,52 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
   attestation輸送は既存どおり保留。上流PR提出も開発の前提にはせず、保留を維持する。
 - 次に確認すること: 第7段階で既存のsession / recorderとタイムラインを再利用する接続点を調べる。
   今回は文書のみの更新で、実送信・コード変更・push・PR作成は行わない。
+
+## 2026-11-25 — 第7段階: Veniceのタスク履歴UI
+
+### 分かったこと
+
+- 実装commitは`4aae9145`。既存session / recorder / timelineを再利用し、ブラウザのパネルで承認したrunの指示、DOM等のステップ、完了・失敗・停止・再起動中断を表示する。
+  見た目は既存の折り畳み行と色・文字・余白に合わせた。新しい履歴DBや別の実行ボタンは作っていない。
+- Coreの実記録にはrunIdとwire callIdを添えた。成功したCore呼び出しをページ報告として重複保存せず、
+  DOMステップやgatewayでの拒否は「Veniceページからの報告」として区別する。表示データでprovider IDや呼び出し権限を作らない。
+- `/venice/run/event`は既存bridge認証に加え、app発行runとChrome由来のsender / documentを照合する。
+  step / completed / failedだけを受け付け、クライアントはsessionやgrantを指定できない。
+  失効後の新規報告は拒否する。未終了runではステップの重複と内容の変わった同一indexを区別し、最初の終了を保持する。
+- 保存ACK後に次のmodel turnへ進み、ACKを失ったときは同じ履歴だけを再取得する。
+  保存不能はパネルに明示し、次のステップを実行しない。Stopが終了報告を追い越しても、想定内の失効を実行エラーとして表示しない。
+- 起動時は保存済みgrantを履歴照合だけに使い、開始だけ残ったrunを中断にする。grant・stdin所有権・処理は復元しない。
+  実装はローカルのタスク履歴であり、Veniceサーバの過去チャットを取り込む機能ではない。
+- 長文は既存のStoredText / asset経路を使い、NULと既知の秘密値パターンを保存前に処理する。
+  ページ報告の64,000文字上限は切り詰め表示を伴う。2.1.55の記録常時ON仕様も保ち、旧record:falseを有効なOFF設定として扱わない。
+
+### 実画面で見つけた不整合を修正した
+
+初回の全体テストは**12,928 passed / 0 failed / 218 skipped**だったが、実Electronの画面では、
+中断したrunにも既存の「最近ツールが動いた」推定が働き、作業中 / Thinkingが残った。
+`SessionSummary.veniceRuns`へ未終了タスクを投影し、ローカルVenice sessionの表示に使うよう修正した。
+複数runの完了・停止は独立に更新し、通常のconversation付きsessionの従来判定は変更しない。
+この一覧はタスクの表示状態であり、生存shellプロセスの一覧・実行権限・同時実行枠とは別である。
+
+### 検証結果
+
+- 追加はbackend 9件、renderer 3件、MAIN / ISOLATED panel 4件の**16件**。
+  実store・実kernel・認証HTTP、永続化、ACK再取得、別run / documentの拒否、保存失敗、長文の秘密値除去、
+  複数run、中断復元、ja / en、文字列表示、表示時に再実行しないこと、Stop競合を確認した。
+- 既存assert・skip指定は変更していない。CJS harnessに履歴専用transport mockと観測を追加し、実backendへの接続は別の追加テストで確認した。
+- 表示状態の修正後に全体を再実行し、**532 passed / 0 failed / 20 skipped（552ファイル）**、
+  **12,931 passed / 0 failed / 218 skipped（13,149テスト）**。通常経路のCJS6ファイルも**100 passed / 0 failed / 0 skipped**。
+  typecheck・buildと変更した拡張JS3ファイルのnode --checkも成功した。
+- `test/venice-history.visual.cjs --seed`と`--restore`を別の実Electronプロセスで実行した。
+  実store・ビルド済みpreload / rendererと専用userDataを使い、英語5履歴行・6イベントを保存し、
+  別プロセスで日本語6履歴行・7イベントとして読み出した。増えた1件は未終了runの中断記録。
+  作業中の誤表示なし、入力送信0、ページエラー0を確認し、両方の実描画も目視した。
+  通常のCoS / 開発サーバは再起動していない。外部HTTP(S)は遮断し、実Venice送信は行っていない。
+- 正のharnessは追跡対象の`test/venice-history.visual.cjs`。前提とコマンドは計画§16、ログと画像はGit除外の`outputs/venice-history/`。
+
+### 不明なこと・次
+
+- 実Veniceモデルによるタスク履歴E2Eと、サーバ側の履歴保持・過去チャット取り込みは未確認。
+  attestation輸送は保留を継続する。
+- 第7段階を完了とし、次は第8段階の通知。既存通知経路へ、正しいsessionを開く完了・失敗・承認待ち通知を接続する。
+  上流用ブランチ・CI・PR提出には触れず、pushも行っていない。
