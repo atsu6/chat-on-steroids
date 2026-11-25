@@ -11,9 +11,10 @@ readの承認UIを実装し、パネルからのgrant要求・ネイティブフ
 **採用案はA: ブラウザループを残し、ローカルツールだけElectronへRPCする。**
 完成したブラウザ操作を保ち、既存のツール実装と権限・記録の境界を再利用する。
 現在のbridgeはgrant付き `core/read` と `core/find`（§14）、独立したwrite同意を要する `core/apply_patch`（§12）、
-独立したshell同意を要する `core/exec_command`（§13）を受ける。Desktopは公開しない。
+独立したshell同意を要する `core/exec_command`（§13）と `core/write_stdin`（§15）を受ける。Desktopは公開しない。
 `AGENTS.md` の「Electron 統合（A案）の範囲」が変更可能なファイルを定める。
-初回のread接続は§10–11、apply_patch接続は§12、exec接続は§13、今回のfind接続は§14。以降のキューは `venice-progress.md` を参照する。
+初回のread接続は§10–11、apply_patch接続は§12、exec接続は§13、find接続は§14、stdin / poll接続は§15。
+現在地と以降のロードマップは `venice-progress.md` を参照する。
 
 ## 1. agent map の要約（8行）
 
