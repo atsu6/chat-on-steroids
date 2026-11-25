@@ -208,7 +208,9 @@ it('keeps the SVG and renderer ferro silhouette and palette in sync', () => {
   expect(mark.querySelector('path')?.getAttribute('d')).toBe(svg.querySelector('path')?.getAttribute('d'));
   for (const selector of ['rect', 'path']) {
     expect(mark.querySelector(selector)?.getAttribute('fill')).toBe(svg.querySelector(selector)?.getAttribute('fill'));
+    expect(mark.querySelector(selector)?.getAttribute('transform')).toBe(svg.querySelector(selector)?.getAttribute('transform'));
   }
+  expect(svg.querySelector('path')?.getAttribute('transform')).toBe('translate(-2 -1)');
   expect(svg.querySelector('rect')?.getAttribute('fill')).toBe('#123e42');
   expect(svg.querySelector('path')?.getAttribute('fill')).toBe('#ffffff');
   expect(read('scripts/make-icon.mjs')).toContain('const INK = [18, 62, 66]');
