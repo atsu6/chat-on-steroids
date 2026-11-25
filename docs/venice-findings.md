@@ -2799,3 +2799,88 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
 - 不明なこと・次: Codexが停止解除後に、上流worktreeだけ独立したlockfile依存関係へ切り替えてnpm ciを行い、UI verifierの途中終了とpackage smokeを直す。
   その後、本文・差分を再提示してPRを作成し、上流ブランチを凍結してから通知へ戻る。詳細な規約a〜d、word-diff、両基準のdiffstat、未提出本文は`outputs/pr-preflight/report.md`。
   今回は上流候補もフォーク側もpushしていない。通常アプリ・主checkoutのnode_modules・通知設定には手を加えていない。
+
+
+## 2026-11-25 — 件数収支、worktree依存分離、成果物を条件にした表示名検証
+
+### 全体件数の差は削除ではなく、比較対象の違い
+
+- 通知を含むフォーク `b67dad4d` の12,958成功＋3失敗と、上流候補 `4f3e6b5e` の12,795成功を比較していた。
+  成功だけの差は163、実行ケースの差は166。`12,961 − 189 − 3 ＋ 26 ＝ 12,795`で説明不能0件。
+- フォーク専用25ファイル189件、共有ファイル内のフォーク専用3件、上流mainで増えた9ファイル26件を全数照合した。
+  同じ上流ブランチ内でのテストファイル削除・改名・統合は0本。locale監査の例外撤去は既存assert内の対象拡大で、ケース数増減0件。
+  ファイル別件数・増減・条件は `docs/venice-test-counts.md`。CJS100件とElectron画面確認はVitest件数に加算しない。
+- 前回の3失敗はrenderer-timeline.part1のimmediate / deferred tracesとsession-list-refreshのcatch-up待ち。
+  元ログのエラー概要は直前の通知節に残し、テスト・assert・timeoutを緩めない。
+
+### worktreeごとの独立インストール
+
+- 上流worktreeのnode_modulesリンクだけをGit除外のoutputs/dependency-bootstrapへ移動し、上流内でNode 22.23.5の `npm ci` を実行した。
+  主checkoutの依存・通常アプリは操作していない。各実体は非symlink、同一device 16777233上でinodeは以下の別値。
+  主checkout=102815150、v2.1.55検証worktree=105647304、上流worktree=107103526。
+- npm ciは既存の依存インストールを置換する。別checkoutのnode_modules共有は禁止し、それぞれでnpm ciする手順とrealpath確認を上流のdevelopment-branding.mdへ記載した。
+  通常のnpm checkout向けの説明であり、上流のNix管理下symlink運用を置き換えるものではない。
+
+### detect-libcとパッケージの検査範囲
+
+- sharp 0.35.4はproduction依存としてdetect-libc ^2.1.2を持ち、dist/sharp.cjsで無条件にrequireする。
+  Linux専用として除去できない。元の失敗asarにはsharpはあったがdetect-libcが無かった。
+- 独立npm ci後、既存 `npm run dist:dir:mac:arm64` だけで再構築し、asar内のdetect-libc/lib/detect-libc.jsとpackage.jsonの実在を確認した。
+  梱包設定・依存宣言・asarUnpackは変更していない。今回観測した失敗は再インストールで直った。
+  外部共有リンクによる依存収集不整合と整合するが、過去のnpm ciが主checkout実体を消したことまでは証明していない。
+  他の依存配置でのcollector不具合・梱包漏れの可能性も、この1回で解消済みとはしない。
+- 同梱Electronで行う既存smokeは終了コードだけでなくJSON値をassertする。
+  version=2.1.55、Electron=44.3.0、MCP=true、sharp=0.35.4、vips=8.18.6、生成PNG=95 bytes、PTY=true、tree=program、desktop=trueが成功。
+  このsmokeはELECTRON_RUN_AS_NODEによるnative stackの証拠であり、GUI mainの起動とは区別する。ログはoutputs/pr-preflight/package-isolated.log。
+- package.mjsが生成したTHIRD-PARTY-NOTICESの473追加／296削除は、上流mainと同一の生成スクリプト・lockfileによるhost依存の出力だった。
+  上流の既存Atkinsonフォント告知と当該hostのnative licenseが再生成され、パッケージには生成後の内容が入る。
+  本PRへ無関係な生成物を混ぜないため追跡ファイルだけ元の上流状態へ戻し、生成後の実値はoutputs/pr-preflight/packaged-third-party-notices.txtへ保持した。
+
+### 途中終了を成功と誤認しないharness
+
+- `scripts/verify-app-display-name.cjs` のNode親が実行ごとに新しいディレクトリを作り、Electron子の終了後に成果物を検査する。
+  Electron側は両状態を撮り終えるまで同じウィンドウを保持する。以前は最初のウィンドウを閉じた時点で終了していた。
+- before.png・after.png・result.jsonの実在と通常ファイルを先にassertし、PNGの非空・シグネチャ・異なるbytesを確認する。
+  JSON内の旧AppState／devの両状態についてnativeタイトル・rendererタイトル・可視ヘッダとエラー0を確認し、最後にだけPASSを出す。
+  以前の成果物やElectronの終了コード0だけでは成功にならない。
+- 追加15テストで欠落3種、空画像、同一画像、非PNG、JSON破損・部分結果、誤ラベル、renderer error、古い成果物、早期正常終了を拒否し、PASS最終出力も確認した。
+  追加テスト・branding・UI runnerの計3ファイル39件が成功した。既存の削除・skip・assert緩和はない。
+- 修復後の実Electron確認は `npm run verify:ui -- app-display-name` で成功し、画像2枚を目視した。
+  正の成果物は上流worktreeの outputs/app-display-name/before.png=327,290 bytes、after.png=330,352 bytes、result.json=341 bytes。
+  legacyはChat On Steroids、devはChat On Steroids (dev)で、3面すべて一致、errors=[]。
+  3成果物を親側検査で確認してから表示名チェックのPASSを復活させた。外部HTTP・ユーザーの実データは使っていない。
+
+
+### GUI起動と上流の最終候補
+
+- 同じパッケージを実GUIとしても起動した。既存smoke-macos-gui.mjsの検査は維持し、Git除外のコピーで専用userData・CLF_BRIDGE_PORTS=0・COS_DEV_BRAND=1だけを指定した。
+  `app started` / `window loaded` / `renderer state ready`の3イベントと10秒の生存を検査し、成功後にこの子プロセスだけを終了した。
+  ログはoutputs/pr-preflight/package-gui-isolated.log、最後は `macos-gui-startup-ok arch=arm64 exit=0 signal=null`。
+  通常アプリ・開発サーバ・ユーザーのprofileには触れていない。
+- 上流の新HEADは `d4c0500b`。全体npm run verifyは**512 passed / 0 failed / 20 skipped（532ファイル）、12,810 passed / 0 failed / 218 skipped（13,028テスト）**。
+  前回12,795からの増分15は、今回追加したharness自己検証1ファイルだけである。branding関連7ファイル178件は従来どおり成功。
+  typecheckとbuildも成功。画面確認は前記のapp-display-name限定実行で、UI全件をローカル再実行したという意味にはしない。
+- DCO / CLA / Signed-off-by必須は現行公開規約に見当たらず、コミットの署名追記・内容書き換えはしていない。したがってDCO range-diffの対象はない。
+- `git diff v2.1.55 d4c0500b --stat` は **49ファイル / +949 / -61**。元の18 / +182 / -12から変わっている。
+  うちmain取り込み自体が20ファイル / +526 / -55、実PRのmain基準は **30ファイル / +423 / -6**。共有のAGENTS.mdを除いて合計49ファイルになる。
+  元の18ファイル固定は規約適合の追加承認で解除済み。最新PR差分の内訳は、表示名コード10ファイル(+62/-5)、カタログ12(+24)、契約・使い方2(+30)、UI proof3(+125)、テスト3(+182/-1)。
+  4f3e6b5e後の修復は5ファイル(+224/-51)、追加はfixture・自己検証テスト・既存UI runnerへのNode親配線である。
+- main基準の変更パスを全件確認し、Venice名0件、通知・workflow・outputs・findings・package設定・画像素材の混入0件。
+  v2.1.55基準に見えるbridge等の変更はmain由来で、実PRには含まれない。
+
+
+### フォーク全体の再実行で再停止（push・提出は未実施）
+
+- フォークはアプリ／テストコードを変更せずにnpm testを全体1回再実行した。**533 passed / 3 failed / 20 skipped（556ファイル）、12,958 passed / 3 failed / 218 skipped（13,179テスト）**。
+  同じ通常経路のCJS6ファイルは**100 passed / 0 failed / 0 skipped**。実行ログはoutputs/pr-preflight/fork-recheck.log。
+- 今回の3失敗は前回と同じ集合ではない。同じ実行のログから確認した内容は以下。
+  - `test/renderer-state.part1.test.ts:2291` — `offers all six bridge ports, saves numbers, and distinguishes saved choice from the override listener`。30秒timeout。
+  - `test/renderer-timeline.part1.test.ts:619` — `keeps the prior transcript inert until the selected detail arrives and fences A to B to A (immediate traces)`。
+    CURRENT A ANSWERが表示されず、旧A ANSWERのまま。これは前回の失敗1件と同じ再発。
+  - `test/renderer-timeline.part4.test.ts:1132` — `scrolls forward through evicted history with wheel, keyboard and scrollbar, then resumes live deltas`。30秒timeout。
+- 最新指示の「テスト赤で停止」に従い、原因を確定するための追加実行・修正へは進んでいない。
+  この3件を今回も一括でフレークと判断したり、全体0 failedと記録したりはしない。既存テスト・assert・skip・timeoutは変更していない。
+- 上流は全体0 failed、成果物3つ、native runtimeと実GUI smokeまで成立しているが、両ブランチが緑というpush条件は未達。
+  **両ブランチともpushなし、PR作成なし**。上流の修復はローカルcommit d4c0500bに保存し、フォークはこの記録と件数比較だけをcommitする。
+- 次の担当はCodex。再開は利用者の停止解除後とし、上記3件の原因調査を先に行う。PRの本文と差分の最終提示・fast-forward push・提出は、その後に緑を確認できた時点で行う。
+  通知Phase Bは未着手であり、上流に通知や基盤を混ぜない。公開用の英語画像は未アップロードのまま、ローカルで保持している。
