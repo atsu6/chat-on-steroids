@@ -2909,10 +2909,24 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
   先行する通常経路のCJS6ファイルも **100 passed / 0 failed / 0 skipped**。typecheck成功。実行中のscoped process観測でもworker上限4を確認した。
 - ケース総数は13,179で不変。前回の失敗3件が成功へ移ったので、12,958＋3＝12,961となる。
   全体所要時間は482.43秒（前回449.23秒）で少し長くなるが、既存の判定期限内で完了するための並列上限として採用する。
-  今回の全体成功は資源競合という説明を支持する。他の負荷条件での非再発まで保証したものとしては扱わない。
+  今回の全体成功は、このMacでの並列資源競合という説明を支持する。
 - 根拠: outputs/pr-preflight/isolate-state-part1.log、isolate-timeline-part1.log、isolate-timeline-part4.log、fork-bounded-workers.log、fork-worker-samples.json。
   ログ・観測データはGit除外。修正と理由はこのcommitへ保存する。
 - 上流候補d4c0500bは変更していない。既存の全体12,810成功／0失敗／218 skip、typecheck・build、成果物3つ、packaged native runtime・実GUI smokeの証拠を再利用する。
   上流mainは8721bb1bのままで候補の祖先。通知・基盤・このrunner上限変更は上流PRへ含めない。
 - 両ブランチが緑という条件が成立したので、fast-forward pushとPR提出へ進む。提出先はtotec448-spec/chat-on-steroids、headはatsu6/chat-on-steroids-upstreamのcodex/upstream-dev-suffix。
   提出前に本文全文とmain基準diffstatを提示し、提出後は上流ブランチを凍結する。
+
+
+### PR提出と上流ブランチの凍結
+
+- runner上限の修正は `7aa17bcb`。フォークのoriginへ53df4580→7aa17bcb、上流候補のoriginへ906666f2→d4c0500bをfast-forwardでpushした。
+  上流候補のorigin pushは最初に理由詳細のないremote rejected (failed)となった。branch ruleなし・protected=false・remoteが旧HEADのままと確認し、先行する別branchのpush完了後に直列で再実行すると成功した。forceや権限変更は使っていない。
+- 実PRの提出元となるGitHub fork `atsu6/chat-on-steroids-upstream` へcodex/upstream-dev-suffixを新規pushした。
+  本文全文とmain基準30ファイル / +423 / -6のdiffstatをチャットに提示してから、次のPRを作成した。
+  **https://github.com/totec448-spec/chat-on-steroids/pull/2285** — Distinguish development builds without changing application identity。
+- PRの実値はopen / draft=false / mergeable=true、head=d4c0500b、base=main、maintainer_can_modify=true、30ファイル / +423 / -6。
+  GitHub上で英語Before / Afterの2画像がどちらも2360×1576で読み込まれることを確認した。実画像・本文は公開用の合成データだけ。
+- 上流の自動CIとPR checklistは起動を確認し、記録時点では実行中／runner待ち。ローカル成功とリモートCI完了は分ける。
+  本文のローカル事前checkはproblems=[]。提出済み本文はoutputs/pr-preflight/pr-body.final.md、CI観測はsubmitted-pr-checks.json（どちらもGit除外）。
+- **上流ブランチはd4c0500bで凍結する。** 以後の通知Phase Bはフォーク側だけで行う。通知の実バナー・クリック受け入れは引き続き未完了で、今回のPR成立を通知検証の完了にはしない。
