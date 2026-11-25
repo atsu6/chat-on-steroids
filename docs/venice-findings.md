@@ -2613,3 +2613,13 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
 
 今回は文書だけの更新なので、前回のテスト・typecheck・build・実画面の成功証跡を再利用した。実行したものとして新しいテスト件数を計上しない。
 今回の追記と再現文書内の名称は(b)文書データに分類し、既存の表示名選択やテストfixtureは変更しない。
+
+## 2026-11-25 — harnessの正を一本化し、PR本文を確認待ちにする
+
+- 実行するharnessの正は`outputs/dev-name-state-verification/electron-title.cjs`。再現文書からソース全文と復元ブロックを削除し、必要なNode／Electron、ビルド済み成果物、実行ディレクトリ、3面の期待値と実行コマンドだけを残した。実行コードは変更していない。
+- 53df4580から`/tmp/runtime-check`へ新規worktreeを作り、修正後の文書の実行ブロックをそのルートで実行した。未追跡の正ファイルが存在せず、Missing canonical harnessで終了コード1。3面確認は未実行で、worktreeは削除した。
+  53df4580時点で全文を文書へ保存したことは上記の経緯として残すが、現在の文書の主張は「前提とコマンドを記録」に限定する。別checkoutでは正ファイルを別途用意する必要がある。
+- 上流906666f2は2コミット・18ファイル +182/-12。17ファイル +180/-11は70589d99単体であり、もう1件は英語カタログの二重計数を直すsetup検証修正。履歴や候補コードを変更せず、この実数で提出前チェックを行った。
+- 候補差分のdocsはdevelopment-branding.mdの9行だけで、workflow・outputsの変更は0件。Venice固有機能やCI基盤の説明は含まれない。
+- PR本文は指定の3点を維持し、上流候補のtypecheck・build成功と対象178 passed / 0 failedの検証行だけを追加した。フォークの件数・アイコン・Venice固有機能は含めない。既存の上流検証ログを再利用し、新しいテスト実行とは扱わない。
+- PR本文全文と候補のdevelopment-branding.mdの+9ハンクを提示する段階で停止する。push・PR作成は行わない。
