@@ -2781,3 +2781,21 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
   計画§17の署名整備済みコピーと`--native --inspect`で、OS通知から正しいsessionへ戻ることを実操作で確認したら完了にする。
 - その後は既存Web UI経路で文字作業MVPの成功率を測り、それから9のDesktop AXへ進む。
   実Venice・スマホ送信、attestation再送、push・PR作成は今回行っていない。
+
+## 2026-11-25 — 上流PR規約対応とpackaged-runtime smokeでの停止
+
+- 分かったこと: 上流CONTRIBUTING / PRテンプレートの現行内容をAPIで確認した。公開規約にDCO / CLA / Signed-off-by必須や特別なコミット件名・ブランチ名規則は見当たらず、履歴の書き換えはしていない。
+  全12翻訳カタログ、契約説明、エッジケース・プラットフォーム・live proof等の必須項目、maintainer編集許可、main追従・検証が必要だった。
+- 利用者の追加承認により18ファイル固定を解除し、上流候補だけ全12言語登録と元のlocale監査の復元を行った。
+  上流の英語はソース文字列を使うため、未使用の部分en.jsonと専用カウント修正を撤去。AppStateの任意表示名と旧snapshotのfallbackをAGENTS.mdへ記載した。
+  21件先行していたmainを通常mergeで取り込み、候補HEADは`4f3e6b5e`。最新main `8721bb1b`基準では27ファイル / +250 / -6。通知・outputs・workflow・findingsはPR差分へ含めていない。
+- 元のoriginはGitHubのforkではなかったため、提出用の`atsu6/chat-on-steroids-upstream`を作り、`pr-fork` remoteへ登録した。候補ブランチはまだpushしていない。PRは未作成で、Phase Bには着手していない。
+- 上流のtypecheck・buildと通常のnpm run verifyは成功。2つの規定Vitest実行の合計は**511 passed / 0 failed / 20 skippedファイル、12,795 passed / 0 failed / 218 skippedテスト**。
+  同じログ内のbranding関連7ファイルは合計178件成功。フォーク側のテスト数とは分けている。
+- 停止理由: macOS arm64パッケージの組み立て・ad-hoc seal検証までは成功したが、packaged-runtime smokeが`Cannot find module 'detect-libc'`で失敗した。
+  electron-builderには多数の推移依存の解決失敗があり、上流worktreeのnode_modulesは主checkoutへのsymlinkだった。環境・依存収集の問題と表示名実装の不具合は未確定のまま分ける。
+- 実Electron用の新しいverify-app-display-nameはPASSを返したが、before.pngのみでafter.png / result.jsonが未生成だった。成功判定を撤回し、harnessの完走と実画面の受け入れを未確認として残す。
+  未完了の検証コードは上流候補のローカルcheckpointに保存した。packagingが生成した無関係なTHIRD-PARTY-NOTICESの差分だけを除外し、両worktreeはcleanにした。
+- 不明なこと・次: Codexが停止解除後に、上流worktreeだけ独立したlockfile依存関係へ切り替えてnpm ciを行い、UI verifierの途中終了とpackage smokeを直す。
+  その後、本文・差分を再提示してPRを作成し、上流ブランチを凍結してから通知へ戻る。詳細な規約a〜d、word-diff、両基準のdiffstat、未提出本文は`outputs/pr-preflight/report.md`。
+  今回は上流候補もフォーク側もpushしていない。通常アプリ・主checkoutのnode_modules・通知設定には手を加えていない。
