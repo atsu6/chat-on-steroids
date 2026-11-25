@@ -342,16 +342,33 @@ UIでは英語catalogの二重計数と、ferroに残った旧folder mark用の�
 変更後の対象5ファイル82テストとCJS100件、実Electronのsetup guide／What's Newチェックが成功した。
 最終コード37a34a4aをrun `45431889881`で再実行し、修正前runは中止した。
 
-[run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)の最終結果はfailure。
+[run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)のattempt 2時点の結果はfailure。
 13 job中11がsuccess、残る`UI checks (macOS 2/2)`と`Verify macOS arm64 (1/2)`はcancelledだった。
 両jobともrunner未割当・steps 0で、GitHubの注記はhosted runnerを取得できなかったこととmacOS arm64の容量不足を示す。
 失敗jobだけを`gh run rerun 45431889881 --repo atsu6/chat-on-venice --failed`で1回再実行したが、
 attempt 2も同じ2 jobが2026-11-25 01:24～01:39 JSTの待機後に開始前キャンセルとなった。
 成功済み11 jobは再実行していない。Windows全6 job、Linux全3 job、macOSの残り2 jobは成功し、CJS100件・typecheck・privacyも実runnerで成功した。
-最終コードのテスト失敗は記録されていないが、未実行の2 jobがあるためCI全体の成功とは扱わない。
+この時点ではテスト失敗は記録されていないが、未実行の2 jobがあるためCI全体の成功とは扱わなかった。
 両attemptのjob情報・注記と最終状態は`outputs/venice-dispatch-and-pr/ci-*.json`に保存した。
-容量回復後に同じ`--failed`を再実行して2 jobの成功を確認する作業が残る。runner構成・arch・skip・assertを変えて代替していない。
-以後のcommitは文書だけで、実装・テスト・workflow・依存関係はこのCI対象SHAと同じ。
+当時は容量回復後の2 job確認が残った。runner構成・arch・skip・assertを変えて代替していない。
+fcf8a3cfまでは文書だけの更新で、実装・テスト・workflow・依存関係はこのCI対象SHAと同じだった。
+
+### 容量回復後に見つかったferro前景のずれ
+
+同じrunのattempt 3では両macOS jobが開始され、Verify macOS arm64 (1/2)も成功した。
+全体は12 success／1 failureとなり、残るUI checks (macOS 2/2)の37/38成功・1失敗はWhat's Newの明色アイコン中央揃えだった。
+ローカルでも`verify-whats-new.cjs --force-device-scale-factor=1`で左右23/21pxの同じ失敗を再現した。
+旧folder補正を消しただけでは、白いferro本体の中心34,約33が台座の中心32,32からずれたままだった。
+
+`5a3fc432`でSVG原本とrenderer spriteの白いpathへ同じtranslate(-2 -1)を加え、既存手順でPNGと派生アイコンを再生成した。
+path形状・色・台座・make-iconの生成方式・トレイのpixel hintは変更していない。SVGとspriteのtransform一致を既存回帰テストの追加assertで固定した。
+関連3ファイル50テストとCJS100件、typecheck、buildが成功し、実ElectronのWhat's NewはDPR 1/2・dark/lightの全条件で既存のpixel判定を通過した。
+実rendererのen/ja・dev/prod・1280/800pxと、生成した16/22/32/48/128/256/512pxの画像も確認した。
+上流用ブランチ906666f2にはferroがないため変更していない。
+修正版の全CIは[run 45531914064](https://github.com/atsu6/chat-on-venice/actions/runs/45531914064)、対象SHAは5a3fc432。
+attempt 1で13/13 job success、全体の結論もsuccessになった。問題のmacOS UI shard 2は38/38成功・0 skippedで、What's Newも初回成功した。
+Windows／Linux／macOSの全検証とCJS・typecheck・privacyが揃い、runner容量待ちと中央揃えの未解決条件は解消した。
+この結果の追記は文書だけで、CI対象から実装・テスト・workflow・依存関係は変更していない。
 
 ## 再配置後HEADの全体検証
 

@@ -2391,18 +2391,51 @@ chatgpt-reinjection.json、runs.json、actions-permissions.json、workflows.json
   flag判定・pixel許容閾値は変更していない。修正後は対象5ファイル82テスト＋CJS100件と、実Electronの両UIチェックが成功した。
 - CI run 45428690299のLinux両shardとCJS100件／typecheck／privacyは成功した。
   修正前の残りjobを止め、最終コード37a34a4aをrun 45431889881で再実行した。
-  [修正後run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)は13 job中11 success／2 cancelled、全体の結論はfailureだった。
+  [修正後run 45431889881](https://github.com/atsu6/chat-on-venice/actions/runs/45431889881)のattempt 2時点では13 job中11 success／2 cancelled、全体の結論はfailureだった。
   Windows全6 job・Linux全3 job・macOSの2 jobが成功し、CJS100件／typecheck／privacyも実runnerで成功した。
   残るUI checks (macOS 2/2)とVerify macOS arm64 (1/2)はrunner未割当・steps 0で、GitHubがhosted runner取得失敗とarm64容量不足を注記していた。
   `gh run rerun 45431889881 --repo atsu6/chat-on-venice --failed`で未実行の2 jobだけを1回再実行した。
   attempt 2も2026-11-25 01:24～01:39 JSTの待機後に同じ理由で開始前キャンセルとなった。成功済み11 jobは再実行していない。
-  最終コードで実行されたテストに失敗はないが、2 jobは未実行でありCI全体は緑ではない。
+  この時点では実行されたテストに失敗はなかったが、2 jobは未実行でありCI全体は緑ではなかった。
   runner構成やarchを変えず、テストの削除・skip追加・assertの緩和も行っていない。
   証跡はoutputs/venice-dispatch-and-prのci-final-state.jsonとci-macos-*-retry-{job,annotations}.json。
-  以後のcommitは文書だけで、実装・テスト・workflow・依存関係はCI対象37a34a4aから変更していない。
+  fcf8a3cfまでは文書だけの更新で、実装・テスト・workflow・依存関係はCI対象37a34a4aから変更していなかった。
 
 ### 残る条件
 
-- CI全体の成功確認はmacOS arm64 runnerの容量回復待ち。回復後、同じrunを`--failed`で再実行して上記2 jobを確認する必要がある。
+- この時点ではmacOS arm64 runnerの容量回復後の2 job確認が残った。後述のattempt 3では開始できた。
 - 旧フックが既に残るChatGPTページは再読み込みが必要。現在のページ操作を中断するreloadは今回行っていない。
 - backgroundの全ChatGPT関連機能を撤去したわけではなく、Veniceへの移行自体は継続中。API最小疎通は別作業。
+
+## 2026-11-25 — CI再開とferro前景の中央揃え修正
+
+### 分かったこと
+
+- 旧run 45431889881を`--failed`で再開したattempt 3は、容量不足だった2 jobを実runnerで開始できた。
+  macOS arm64の単体テスト・専有テスト・実plugin検証が成功し、全体は12 success／1 failureになった。
+  UI checks (macOS 2/2)は37/38成功で、唯一の失敗はWhat's Newの明色アイコン中央揃えだった。
+- ローカルの既存`verify-whats-new.cjs --force-device-scale-factor=1`で同じ左右23px／21px、上下18px／17pxの失敗を再現した。
+  白いferroの元座標は横23～45、縦約12～54で、中心は34,約33。ティールの台座の中心32,32からずれていた。
+  以前のfolder用CSS補正除去は必要だったが、これだけでは前景自体のずれを直せていなかった。
+- `5a3fc432`でSVG原本とrenderer spriteの同じpathにtranslate(-2 -1)を設定した。
+  pathの形・白とティールの色・台座の位置は変更していない。themeやDPRごとの条件分岐や測定閾値変更も加えていない。
+  既存のheadless Chrome手順で原本PNGを更新し、make-iconで追跡対象の拡張アイコン4サイズも再生成した。
+  生成script自体とトレイ16/32pxのpixel hintは変更していない。
+- SVG原本とspriteのtransform一致、補正値を既存テストへ追加assertで固定した。既存assertの削除・緩和・skip追加はない。
+  CJS6ファイル100 passedと関連3ファイル50 passed、typecheck・buildが成功した。
+  実ElectronのWhat's New検証はDPR 1/2とdark/lightで成功し、短い画面・ドイツ語・閉じる操作も既存の検証を通った。
+  実rendererのen/ja・dev/prod・1280/800pxに文字切れ・pageerrorがないことと、生成アイコンの全レビューサイズも確認した。
+  16pxのトレイ用ferroは歯と隙間が残り、22/32/48pxも塗り・輪郭を保持していた。
+- 修正はフォーク側だけ。上流候補906666f2は元のCoSマークを維持し、今回更新していない。
+  [修正版run 45531914064](https://github.com/atsu6/chat-on-venice/actions/runs/45531914064)で5a3fc432の全CIを実行した。
+  attempt 1で13/13 job success、全体の結論もsuccess。Windows／Linux／macOSの全検証とCJS・typecheck・privacyが成功した。
+  問題のmacOS UI shard 2は38/38成功・0 skippedで、What's Newも初回成功した。
+
+証跡: outputs/venice-dispatch-and-prのci-attempt3-state.json、ci-attempt3-failed.log、whats-new-dpr1-before.log、
+whats-new-dpr{1,2}-fixed.log、ferro-{targeted,typecheck,build,visual}.logとferro-dpr1/、ci-ferro-fixed-state.json、ci-ferro-fixed-ui.log。
+生成画像一覧はoutputs/dev-brand/icon-sizes.png。
+
+### 結論と次
+
+- CIのrunner待ちと実際のアイコン中央揃え失敗は解消した。結果の追記だけなので、実装・テスト・workflow・依存関係はCI対象5a3fc432と同じ。
+- 次のAPI最小疎通は別作業のまま。上流PRはまだ作成していない。
