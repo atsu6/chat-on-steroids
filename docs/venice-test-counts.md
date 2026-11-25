@@ -105,3 +105,11 @@
 ケース総数13,179は元のフォーク実行と同じ。ただし今回の失敗はrenderer-state.part1、renderer-timeline.part1、renderer-timeline.part4で、元の失敗集合とは異なる。
 CJS6ファイル100件は成功、Vitestとは別計上。根拠は `outputs/pr-preflight/fork-recheck.log`。
 テスト赤の停止条件によりpush・PR提出はしない。上流の12,810成功は、フォークが緑であることの代わりにはならない。
+
+
+## 停止解除後、runner上限を修正した全体実行
+
+3ファイルを単独実行して71＋111＋77＝259件成功を確認し、フォークのrunner既定を最大4 workerへ制限した。
+テスト・assert・timeout・retry設定は変更せず、plain npm testで12,961成功／0失敗／218 skip、556ファイル（536成功／0失敗／20 skip）。
+総数13,179は不変で、前回の失敗3件が成功へ移った収支は `12,958 ＋ 3 ＝ 12,961`。
+CJS6ファイル100件も成功、Vitestとは別計上。根拠は `outputs/pr-preflight/fork-bounded-workers.log`。

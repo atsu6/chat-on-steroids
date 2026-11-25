@@ -2884,3 +2884,35 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron outputs/dev-name-state-
   **両ブランチともpushなし、PR作成なし**。上流の修復はローカルcommit d4c0500bに保存し、フォークはこの記録と件数比較だけをcommitする。
 - 次の担当はCodex。再開は利用者の停止解除後とし、上記3件の原因調査を先に行う。PRの本文と差分の最終提示・fast-forward push・提出は、その後に緑を確認できた時点で行う。
   通知Phase Bは未着手であり、上流に通知や基盤を混ぜない。公開用の英語画像は未アップロードのまま、ローカルで保持している。
+
+
+## 2026-11-25 — 停止解除後の3失敗の切り分けとrunnerの並列上限
+
+### 単独実行と修正の判断
+
+- 同じ3ファイルを、Node 22.23.5で1ファイルずつ独立実行した。state.part1は71件、timeline.part1は111件、timeline.part4は77件、計259件がすべて成功した。
+  同じテスト・assert・timeoutのままであり、#2261で既に入った条件待ちを追加で変更していない。
+- 問題のケースの比較（前回の全体 → 単独 → 修正後の全体、ms）:
+  - bridge port設定: 32,907（timeout）→ 1,264 → 1,657。
+  - A→B→A / immediate traces: 13,975（CURRENT A ANSWERなし）→ 1,148 → 1,461。
+  - 双方向履歴スクロール: 30,324（timeout）→ 2,810 → 3,221。
+- Vitest 5.0.5のrun時の既定はavailableParallelism−1。この10 logical CPUのMacでは9 workerになる。
+  単独timeline workerのRSSは約1.7GBまで増え、当時swap使用も約9GBだった。個別のアプリ操作ではなく、多数のrendererを並列mountする全体実行時の負荷が主な差だった。
+  これらの比較から過剰な並列実行を原因候補とし、製品のtimeline処理ではなくrunnerの資源上限を修正した。
+- 変更はフォークのvitest.config.tsだけ。`maxWorkers = max(1, min(4, availableParallelism−1))`を既定とし、CLIによる明示上書きは既存どおり。
+  低CPU環境で元より並列度を増やさず、大きいマシンでもrenderer-heavyなworkerを際限なく増やさない。
+  testTimeout / hookTimeoutは30秒、harness waitForは10秒、retryの既定は0のまま。test / srcの差分は0で、削除・skip・assert緩和はない。
+
+### 修正後の全体確認
+
+- plain `npm test` が **12,961 passed / 0 failed / 218 skipped（13,179テスト）、536 passed / 0 failed / 20 skipped（556ファイル）**。
+  先行する通常経路のCJS6ファイルも **100 passed / 0 failed / 0 skipped**。typecheck成功。実行中のscoped process観測でもworker上限4を確認した。
+- ケース総数は13,179で不変。前回の失敗3件が成功へ移ったので、12,958＋3＝12,961となる。
+  全体所要時間は482.43秒（前回449.23秒）で少し長くなるが、既存の判定期限内で完了するための並列上限として採用する。
+  今回の全体成功は資源競合という説明を支持する。他の負荷条件での非再発まで保証したものとしては扱わない。
+- 根拠: outputs/pr-preflight/isolate-state-part1.log、isolate-timeline-part1.log、isolate-timeline-part4.log、fork-bounded-workers.log、fork-worker-samples.json。
+  ログ・観測データはGit除外。修正と理由はこのcommitへ保存する。
+- 上流候補d4c0500bは変更していない。既存の全体12,810成功／0失敗／218 skip、typecheck・build、成果物3つ、packaged native runtime・実GUI smokeの証拠を再利用する。
+  上流mainは8721bb1bのままで候補の祖先。通知・基盤・このrunner上限変更は上流PRへ含めない。
+- 両ブランチが緑という条件が成立したので、fast-forward pushとPR提出へ進む。提出先はtotec448-spec/chat-on-steroids、headはatsu6/chat-on-steroids-upstreamのcodex/upstream-dev-suffix。
+  提出前に本文全文とmain基準diffstatを提示し、提出後は上流ブランチを凍結する。

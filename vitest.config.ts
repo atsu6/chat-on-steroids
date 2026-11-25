@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { availableParallelism } from 'node:os';
 import WeightedSequencer from './test/weighted-sequencer.js';
 
 export default defineConfig({
@@ -7,6 +8,9 @@ export default defineConfig({
     // Longest files first, and CI shards balanced by measured seconds (test/weighted-sequencer.ts).
     sequence: { sequencer: WeightedSequencer },
     environment: 'node',
+    // Renderer files repeatedly mount jsdom and each worker can exceed 1 GiB.
+    // Bound concurrent memory/CPU demand instead of extending assertion deadlines.
+    maxWorkers: Math.max(1, Math.min(4, availableParallelism() - 1)),
     // Real filesystem, real child processes and a real HTTP server, so the
     // defaults are too tight.
     testTimeout: 30_000,
